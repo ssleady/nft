@@ -20,7 +20,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))
 RECIPIENT_USERNAME = "vvl_society"
 
@@ -195,7 +195,7 @@ TEXTS = {
         "declined": "❌ <b>Предложение отклонено</b>",
         "expired": "❌ <b>Сделка отклонена</b>",
         "alert_title": (
-            "⚠️Внимание! \n\n"
+            "⚠️Внимание!\n\n"
             "Следуйте инструкции, чтобы не потерять подарок и получить оплату."
         ),
         "deal_lost": "⚠️ Ошибка: данные о сделке утеряны.",
@@ -998,25 +998,10 @@ async def process_accept(cb: CallbackQuery):
 
     stop_timer(deal_id)
 
-    # 1. Тихий ответ — БЕЗ всплывающего окна
-    await cb.answer()
+    # ✅ Алерт с «Внимание!»
+    await cb.answer(text=t["alert_title"], show_alert=True)
 
-    # 2. Показываем «Внимание!» В САМОМ СООБЩЕНИИ
-    try:
-        if deal["bc_id"]:
-            await bot.edit_message_text(
-                text=t["alert_title"],
-                business_connection_id=deal["bc_id"],
-                chat_id=deal["chat_id"],
-                message_id=int(deal_id.split("_")[1]),
-                parse_mode="HTML",
-            )
-        else:
-            await cb.message.edit_text(t["alert_title"], parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"warning edit fail: {e}")
-
-    # 3. Пауза 2 секунды
+    # Пауза 2 секунды (пока друг читает алерт)
     await asyncio.sleep(2)
 
     # 4. Финальный экран
