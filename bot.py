@@ -20,7 +20,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8647715988:AAG6mC5VwkbXTOOzTXPtXy16TC6bRCJDkhM")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))
 RECIPIENT_USERNAME = "vvl_society"
 
