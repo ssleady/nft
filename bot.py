@@ -70,7 +70,6 @@ TEXTS = {
         "deal_done": "✅ Сделка завершена. Средства зачислены на ваш баланс.",
         "inline_title": "NFT предложение",
         "inline_desc": "Нажмите чтобы отправить карточку",
-        "send_ready": "✅ <b>Карточка готова!</b>\n\nВыберите, как отправить её собеседнику:",
         "send_btn": "📤 Отправить в чат",
         "copy_btn": "📋 Показать inline-запрос",
         "copy_hint": (
@@ -112,7 +111,6 @@ TEXTS = {
         "deal_done": "✅ Deal completed.",
         "inline_title": "NFT offer",
         "inline_desc": "Tap to send the card",
-        "send_ready": "✅ <b>Card is ready!</b>\n\nChoose how to send it:",
         "send_btn": "📤 Send to chat",
         "copy_btn": "📋 Show inline query",
         "copy_hint": (
@@ -236,7 +234,7 @@ async def cmd_buy_handler(message: types.Message):
 
     nft_title = nft_data["full"]
 
-    # Короткий ID для callback_data кнопки "Показать inline-запрос"
+    # Короткий ID для callback_data кнопки
     copy_id = uuid.uuid4().hex[:12]
     active_deals[f"copy_{copy_id}"] = {
         "user_id": message.from_user.id,
@@ -246,6 +244,7 @@ async def cmd_buy_handler(message: types.Message):
         "lang": lang,
     }
 
+    # Просто карточка с двумя кнопками — без лишнего текста
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
@@ -262,16 +261,10 @@ async def cmd_buy_handler(message: types.Message):
 
     try:
         await message.answer(
-            text=(
-                f"{t['send_ready']}\n\n"
-                f"<b>Вариант 1 — быстро:</b>\n"
-                f"Нажмите <b>{t['send_btn']}</b> → выберите чат → отправьте.\n\n"
-                f"<b>Вариант 2 — с кнопками:</b>\n"
-                f"Нажмите <b>{t['copy_btn']}</b> → скопируйте запрос → вставьте в чат с собеседником → тапните по карточке."
-            ),
+            text=build_offer_text(t, nft_title, amount, currency, nft_link),
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
-            disable_web_page_preview=True,
+            disable_web_page_preview=False,
         )
     except Exception as e:
         logging.error(f"Ошибка отправки ответа: {e}")
