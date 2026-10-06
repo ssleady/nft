@@ -133,15 +133,6 @@ def parse_nft_link(url):
     }
 
 
-# ================= ЛОГИРОВАНИЕ ВСЕХ СООБЩЕНИЙ =================
-@dp.message()
-async def log_all_messages(message: types.Message):
-    logging.info(
-        f"[MSG] chat_id={message.chat.id}, user={message.from_user.id}, "
-        f"business_id={message.business_connection_id}, text={message.text!r}"
-    )
-
-
 # ================= ОБЩИЕ ФУНКЦИИ =================
 def build_offer_text(t, nft_title, amount, currency, nft_link):
     return (
@@ -213,7 +204,7 @@ def parse_buy_args(text):
 async def cmd_buy_handler(message: types.Message):
     is_business = message.business_connection_id is not None
 
-    # Удаляем сообщение только в обычных чатах (в business — Telegram не даёт)
+    # Удаляем сообщение только в обычных чатах
     if not is_business:
         try:
             await message.delete()
@@ -247,7 +238,6 @@ async def cmd_buy_handler(message: types.Message):
         "chat_id": message.chat.id,
     }
 
-    # В бизнес-чатах префикс "b" — чтобы отличать колбэки
     prefix = "b" if is_business else ""
 
     text = build_offer_text(t, nft_title, amount, currency, nft_link)
@@ -303,7 +293,6 @@ async def process_accept(callback: CallbackQuery):
         await callback.message.edit_text(t["deal_lost"])
         return
 
-    # Определяем префикс по типу callback
     prefix = "b" if callback.data.startswith("baccept_") else ""
 
     text = build_final_text(t, deal)
@@ -342,14 +331,23 @@ async def handle(request):
 
 
 async def main():
+    logging.info("=== MAIN STARTED ===")
+    logging.info(f"BOT_TOKEN exists: {bool(BOT_TOKEN)}")
+
+    port = int(os.environ.get("PORT", 10000))
+    logging.info(f"Using port: {port}")
+
     app = web.Application()
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+    logging.info("=== WEB SERVER STARTED ===")
 
     await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("=== WEBHOOK DELETED, STARTING POLLING ===")
+
     await dp.start_polling(bot)
 
 
