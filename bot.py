@@ -5,13 +5,7 @@ import re
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.types import (
-    InlineKeyboardButton,
-    CallbackQuery,
-    BusinessMessage,
-    BusinessConnection,
-    BusinessCallbackQuery,
-)
+from aiogram.types import InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -144,11 +138,11 @@ def parse_nft_link(url):
 async def log_all_messages(message: types.Message):
     logging.info(
         f"[MSG] chat_id={message.chat.id}, user={message.from_user.id}, "
-        f"text={message.text!r}"
+        f"business_id={message.business_connection_id}, text={message.text!r}"
     )
 
 
-# ================= ОБЩАЯ ЛОГИКА КАРТОЧКИ СДЕЛКИ =================
+# ================= ОБЩИЕ ФУНКЦИИ =================
 def build_offer_text(t, nft_title, amount, currency, nft_link):
     return (
         f"<b>{t['header']}</b>\n"
@@ -203,7 +197,6 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang, prefix=""):
 
 
 def parse_buy_args(text):
-    """Возвращает (lang, nft_link, amount, currency) или None."""
     args = text.split()
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
@@ -214,15 +207,18 @@ def parse_buy_args(text):
     return lang, args[1], args[2], args[3].upper()
 
 
-# ================= ОБЫЧНЫЕ ЧАТЫ (личка с ботом, группы) =================
-
+# ================= КОМАНДА .buy / /buy =================
 @dp.message(Command("buy"))
 @dp.message(F.text.startswith(".buy"))
 async def cmd_buy_handler(message: types.Message):
-    try:
-        await message.delete()
-    except Exception as e:
-        logging.warning(f"Не удалось удалить сообщение: {e}")
+    is_business = message.business_connection_id is not None
+
+    # Удаляем сообщение только в обычных чатах (в business — Telegram не даёт)
+    if not is_business:
+        try:
+            await message.delete()
+        except Exception as e:
+            logging.warning(f"Не удалось удалить сообщение: {e}")
 
     parsed = parse_buy_args(message.text)
     if not parsed:
@@ -251,9 +247,12 @@ async def cmd_buy_handler(message: types.Message):
         "chat_id": message.chat.id,
     }
 
+    # В бизнес-чатах префикс "b" — чтобы отличать колбэки
+    prefix = "b" if is_business else ""
+
     text = build_offer_text(t, nft_title, amount, currency, nft_link)
     builder = build_offer_keyboard(
-        t, message.chat.id, message.from_user.id, lang, prefix=""
+        t, message.chat.id, message.from_user.id, lang, prefix=prefix
     )
 
     await message.answer(
@@ -264,7 +263,9 @@ async def cmd_buy_handler(message: types.Message):
     )
 
 
+# ================= ОТКЛОНИТЬ =================
 @dp.callback_query(F.data.startswith("decline_"))
+@dp.callback_query(F.data.startswith("bdecline_"))
 async def process_decline(callback: CallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
@@ -279,7 +280,9 @@ async def process_decline(callback: CallbackQuery):
     await callback.answer()
 
 
+# ================= ПРИНЯТЬ =================
 @dp.callback_query(F.data.startswith("accept_"))
+@dp.callback_query(F.data.startswith("baccept_"))
 async def process_accept(callback: CallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
@@ -300,9 +303,12 @@ async def process_accept(callback: CallbackQuery):
         await callback.message.edit_text(t["deal_lost"])
         return
 
+    # Определяем префикс по типу callback
+    prefix = "b" if callback.data.startswith("baccept_") else ""
+
     text = build_final_text(t, deal)
     builder = build_final_keyboard(
-        t, deal, deal_chat_id, deal_user_id, lang, prefix=""
+        t, deal, deal_chat_id, deal_user_id, lang, prefix=prefix
     )
 
     await callback.message.edit_text(
@@ -313,126 +319,10 @@ async def process_accept(callback: CallbackQuery):
     )
 
 
+# ================= ПОДТВЕРДИТЬ ПЕРЕДАЧУ =================
 @dp.callback_query(F.data.startswith("confirm_"))
+@dp.callback_query(F.data.startswith("bconfirm_"))
 async def process_confirm(callback: CallbackQuery):
-    parts = callback.data.split("_")
-    lang = parts[-1] if parts[-1] in TEXTS else "ru"
-    t = TEXTS[lang]
-    deal_user_id = parts[-2]
-
-    if str(callback.from_user.id) != deal_user_id:
-        await callback.answer(t["not_yours"], show_alert=True)
-        return
-
-    await callback.answer(t["confirmed"], show_alert=True)
-    await callback.message.edit_text(t["deal_done"])
-
-
-# ================= BUSINESS API (Автоматизация чатов) =================
-
-@dp.business_connection()
-async def on_business_connection(connection: BusinessConnection):
-    logging.info(
-        f"[BUSINESS] conn_id={connection.id}, "
-        f"user_id={connection.user.id}, "
-        f"enabled={connection.is_enabled}"
-    )
-
-
-@dp.business_message(Command("buy"))
-@dp.business_message(F.text.startswith(".buy"))
-async def business_buy(message: BusinessMessage):
-    parsed = parse_buy_args(message.text)
-    if not parsed:
-        t = TEXTS["ru"]
-        await message.answer(t["usage"])
-        return
-
-    lang, nft_link, amount, currency = parsed
-    t = TEXTS[lang]
-
-    nft_data = parse_nft_link(nft_link)
-    if not nft_data:
-        await message.answer(t["invalid_link"])
-        return
-
-    nft_title = nft_data["full"]
-
-    deal_id = f"{message.chat.id}_{message.from_user.id}"
-    active_deals[deal_id] = {
-        "link": nft_link,
-        "amount": amount,
-        "currency": currency,
-        "title": nft_title,
-        "lang": lang,
-        "user_id": message.from_user.id,
-        "chat_id": message.chat.id,
-    }
-
-    text = build_offer_text(t, nft_title, amount, currency, nft_link)
-    builder = build_offer_keyboard(
-        t, message.chat.id, message.from_user.id, lang, prefix="b"
-    )
-
-    await message.answer(
-        text=text,
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-        disable_web_page_preview=False,
-    )
-
-
-@dp.business_callback_query(F.data.startswith("bdecline_"))
-async def business_decline(callback: BusinessCallbackQuery):
-    parts = callback.data.split("_")
-    lang = parts[-1] if parts[-1] in TEXTS else "ru"
-    t = TEXTS[lang]
-    deal_user_id = parts[-2]
-
-    if str(callback.from_user.id) != deal_user_id:
-        await callback.answer(t["not_yours"], show_alert=True)
-        return
-
-    await callback.message.edit_text(t["declined"])
-    await callback.answer()
-
-
-@dp.business_callback_query(F.data.startswith("baccept_"))
-async def business_accept(callback: BusinessCallbackQuery):
-    parts = callback.data.split("_")
-    lang = parts[-1] if parts[-1] in TEXTS else "ru"
-    t = TEXTS[lang]
-    deal_user_id = parts[-2]
-    deal_chat_id = parts[-3]
-
-    if str(callback.from_user.id) != deal_user_id:
-        await callback.answer(t["not_yours"], show_alert=True)
-        return
-
-    await callback.answer(text=t["alert_title"], show_alert=True)
-    await asyncio.sleep(1.5)
-
-    deal_id = f"{deal_chat_id}_{deal_user_id}"
-    deal = active_deals.get(deal_id)
-    if not deal:
-        await callback.message.edit_text(t["deal_lost"])
-        return
-
-    text = build_final_text(t, deal)
-    builder = build_final_keyboard(
-        t, deal, deal_chat_id, deal_user_id, lang, prefix="b"
-    )
-
-    await callback.message.edit_text(
-        text=text,
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-        disable_web_page_preview=False,
-    )
-
-
-@dp.business_callback_query(F.data.startswith("bconfirm_"))
-async def business_confirm(callback: BusinessCallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
     t = TEXTS[lang]
@@ -459,16 +349,8 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
     await site.start()
 
-    # Важно: получать business-апдейты
     await bot.delete_webhook(drop_pending_updates=True)
-    allowed_updates = dp.resolve_used_update_types()
-    # Добавляем business-типы вручную, если их нет в resolve (на всякий случай)
-    for extra in ("business_connection", "business_message", "business_callback_query"):
-        if extra not in allowed_updates:
-            allowed_updates.append(extra)
-    logging.info(f"Allowed updates: {allowed_updates}")
-
-    await dp.start_polling(bot, allowed_updates=allowed_updates)
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
