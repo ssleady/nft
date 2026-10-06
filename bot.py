@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -168,11 +169,11 @@ def build_offer_keyboard(t, chat_id, user_id, lang):
     builder.row(
         InlineKeyboardButton(
             text=t["decline_btn"],
-            callback_data=f"decline_{chat_id}_{user_id}_{lang}",
+            callback_data=f"d_{chat_id}_{user_id}_{lang}",
         ),
         InlineKeyboardButton(
             text=t["accept_btn"],
-            callback_data=f"accept_{chat_id}_{user_id}_{lang}",
+            callback_data=f"a_{chat_id}_{user_id}_{lang}",
         ),
     )
     return builder
@@ -200,7 +201,7 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang):
     builder.row(
         InlineKeyboardButton(
             text=t["confirm_btn"],
-            callback_data=f"confirm_{chat_id}_{user_id}_{lang}",
+            callback_data=f"c_{chat_id}_{user_id}_{lang}",
         )
     )
     return builder
@@ -234,7 +235,16 @@ async def cmd_buy_handler(message: types.Message):
         return
 
     nft_title = nft_data["full"]
-    username = BOT_USERNAME or "work_vllw_bot"
+
+    # Короткий ID для callback_data кнопки "Показать inline-запрос"
+    copy_id = uuid.uuid4().hex[:12]
+    active_deals[f"copy_{copy_id}"] = {
+        "user_id": message.from_user.id,
+        "link": nft_link,
+        "amount": amount,
+        "currency": currency,
+        "lang": lang,
+    }
 
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -246,7 +256,7 @@ async def cmd_buy_handler(message: types.Message):
     builder.row(
         InlineKeyboardButton(
             text=t["copy_btn"],
-            callback_data=f"copydata|{message.from_user.id}|{nft_link}|{amount}|{currency}|{lang}",
+            callback_data=f"cp_{copy_id}",
         )
     )
 
@@ -275,24 +285,24 @@ async def cmd_buy_handler(message: types.Message):
 
 
 # ================= Показать inline-запрос =================
-@dp.callback_query(F.data.startswith("copydata|"))
+@dp.callback_query(F.data.startswith("cp_"))
 async def process_copy(callback: CallbackQuery):
-    parts = callback.data.split("|")
-    if len(parts) != 6:
-        await callback.answer("Ошибка", show_alert=True)
+    copy_id = callback.data[len("cp_"):]
+    data = active_deals.get(f"copy_{copy_id}")
+
+    if not data:
+        await callback.answer("Ссылка устарела, повторите команду", show_alert=True)
         return
 
-    _, user_id, nft_link, amount, currency, lang = parts
-
-    if str(callback.from_user.id) != user_id:
+    if str(callback.from_user.id) != str(data["user_id"]):
         await callback.answer("Не для вас", show_alert=True)
         return
 
-    query = f"{nft_link} {amount} {currency}"
-    if lang == "en":
+    query = f"{data['link']} {data['amount']} {data['currency']}"
+    if data["lang"] == "en":
         query += " eu"
 
-    t = TEXTS[lang]
+    t = TEXTS[data["lang"]]
     username = BOT_USERNAME or "work_vllw_bot"
     text = t["copy_hint"].format(bot=username, query=query)
 
@@ -361,7 +371,7 @@ async def inline_query_handler(query: InlineQuery):
     builder = build_offer_keyboard(t, chat_id, user_id, lang)
 
     result = InlineQueryResultArticle(
-        id=f"offer_{deal_id}",
+        id=f"offer_{uuid.uuid4().hex[:8]}",
         title=f"{t['inline_title']}: {nft_title}",
         description=f"{amount} {currency} — {t['inline_desc']}",
         input_message_content=InputTextMessageContent(
@@ -375,7 +385,7 @@ async def inline_query_handler(query: InlineQuery):
 
 
 # ================= КНОПКИ СДЕЛКИ =================
-@dp.callback_query(F.data.startswith("decline_"))
+@dp.callback_query(F.data.startswith("d_"))
 async def process_decline(callback: CallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
@@ -393,7 +403,7 @@ async def process_decline(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data.startswith("accept_"))
+@dp.callback_query(F.data.startswith("a_"))
 async def process_accept(callback: CallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
@@ -431,7 +441,7 @@ async def process_accept(callback: CallbackQuery):
         logging.error(f"Ошибка edit: {e}")
 
 
-@dp.callback_query(F.data.startswith("confirm_"))
+@dp.callback_query(F.data.startswith("c_"))
 async def process_confirm(callback: CallbackQuery):
     parts = callback.data.split("_")
     lang = parts[-1] if parts[-1] in TEXTS else "ru"
