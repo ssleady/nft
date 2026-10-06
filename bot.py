@@ -39,7 +39,9 @@ def parse_nft_link(url):
         "url": url
     }
 
-
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("Бот работает. Версия 2.")
 # --- Команда /buy ---
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
