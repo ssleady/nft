@@ -70,13 +70,6 @@ TEXTS = {
         "deal_done": "✅ Сделка завершена. Средства зачислены на ваш баланс.",
         "inline_title": "NFT предложение",
         "inline_desc": "Нажмите чтобы отправить карточку",
-        "send_btn": "📤 Отправить в чат",
-        "copy_btn": "📋 Показать inline-запрос",
-        "copy_hint": (
-            "Скопируйте и вставьте в нужный чат:\n\n"
-            "<code>@{bot} {query}</code>\n\n"
-            "Затем тапните по появившейся карточке."
-        ),
     },
     "en": {
         "usage": (
@@ -111,13 +104,6 @@ TEXTS = {
         "deal_done": "✅ Deal completed.",
         "inline_title": "NFT offer",
         "inline_desc": "Tap to send the card",
-        "send_btn": "📤 Send to chat",
-        "copy_btn": "📋 Show inline query",
-        "copy_hint": (
-            "Copy and paste into the chat:\n\n"
-            "<code>@{bot} {query}</code>\n\n"
-            "Then tap the card."
-        ),
     },
 }
 
@@ -163,6 +149,7 @@ def build_offer_text(t, nft_title, amount, currency, nft_link):
 
 
 def build_offer_keyboard(t, chat_id, user_id, lang):
+    """Карточка с двумя кнопками: Отклонить / Принять."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
@@ -205,7 +192,7 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang):
     return builder
 
 
-# ================= КОМАНДА .buy / /buy =================
+# ================= КОМАНДА .buy / /buy (личка с ботом) =================
 @dp.message(Command("buy"))
 @dp.message(F.text.startswith(".buy"))
 async def cmd_buy_handler(message: types.Message):
@@ -234,30 +221,22 @@ async def cmd_buy_handler(message: types.Message):
 
     nft_title = nft_data["full"]
 
-    # Короткий ID для callback_data кнопки
-    copy_id = uuid.uuid4().hex[:12]
-    active_deals[f"copy_{copy_id}"] = {
-        "user_id": message.from_user.id,
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    deal_id = f"{chat_id}_{user_id}"
+
+    active_deals[deal_id] = {
         "link": nft_link,
         "amount": amount,
         "currency": currency,
+        "title": nft_title,
         "lang": lang,
+        "user_id": user_id,
+        "chat_id": chat_id,
     }
 
-    # Просто карточка с двумя кнопками — без лишнего текста
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text=t["send_btn"],
-            url=f"https://t.me/share/url?url={nft_link}&text={amount}%20{currency}",
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text=t["copy_btn"],
-            callback_data=f"cp_{copy_id}",
-        )
-    )
+    # Карточка с двумя кнопками — Отклонить / Принять
+    builder = build_offer_keyboard(t, chat_id, user_id, lang)
 
     try:
         await message.answer(
@@ -277,33 +256,7 @@ async def cmd_buy_handler(message: types.Message):
         logging.warning(f"Не удалось удалить сообщение: {e}")
 
 
-# ================= Показать inline-запрос =================
-@dp.callback_query(F.data.startswith("cp_"))
-async def process_copy(callback: CallbackQuery):
-    copy_id = callback.data[len("cp_"):]
-    data = active_deals.get(f"copy_{copy_id}")
-
-    if not data:
-        await callback.answer("Ссылка устарела, повторите команду", show_alert=True)
-        return
-
-    if str(callback.from_user.id) != str(data["user_id"]):
-        await callback.answer("Не для вас", show_alert=True)
-        return
-
-    query = f"{data['link']} {data['amount']} {data['currency']}"
-    if data["lang"] == "en":
-        query += " eu"
-
-    t = TEXTS[data["lang"]]
-    username = BOT_USERNAME or "work_vllw_bot"
-    text = t["copy_hint"].format(bot=username, query=query)
-
-    await callback.message.answer(text=text, parse_mode="HTML")
-    await callback.answer("Готово")
-
-
-# ================= INLINE MODE =================
+# ================= INLINE MODE (для отправки собеседнику) =================
 @dp.inline_query()
 async def inline_query_handler(query: InlineQuery):
     text = (query.query or "").strip()
