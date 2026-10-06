@@ -21,15 +21,15 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 active_deals = {}
-BOT_USERNAME = "work_vllw_bot"  # запасное значение, обновится при старте
+BOT_USERNAME = "work_vllw_bot"
 
 
 # ================= ТЕКСТЫ =================
 TEXTS = {
     "ru": {
         "usage": (
-            "⚠️ Использование: `.send <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
-            "Пример: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+            "⚠️ Использование: `.buy <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
+            "Пример: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`"
         ),
         "invalid_link": "⚠️ Неверная ссылка на NFT.",
         "header": "Telegram",
@@ -80,8 +80,8 @@ TEXTS = {
     },
     "en": {
         "usage": (
-            "⚠️ Usage: `.send <NFT_link> <amount> <currency> [eu]`\n"
-            "Example: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+            "⚠️ Usage: `.buy <NFT_link> <amount> <currency> [eu]`\n"
+            "Example: `.buy https://t.me/nft/SnoopDogg-9203 1000 STARS`"
         ),
         "invalid_link": "⚠️ Invalid NFT link.",
         "header": "Telegram",
@@ -125,7 +125,6 @@ TEXTS = {
 
 # ================= ПАРСИНГ =================
 def parse_nft_link(url):
-    # Очищаем от невидимых символов
     url = (url or "").strip()
     for ch in ("\u00a0", "\u200b", "\u200f", "\u200e"):
         url = url.replace(ch, "")
@@ -146,7 +145,7 @@ def parse_buy_args(text):
         args = args[:-1]
     if args:
         first = args[0].lower().lstrip("/.")
-        if first in ("buy", "send"):
+        if first == "buy":
             args = args[1:]
     if len(args) < 3:
         return None
@@ -207,12 +206,10 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang):
     return builder
 
 
-# ================= КОМАНДА .send / .buy / /send / /buy =================
-@dp.message(Command("send"))
+# ================= КОМАНДА .buy / /buy =================
 @dp.message(Command("buy"))
-@dp.message(F.text.startswith(".send"))
 @dp.message(F.text.startswith(".buy"))
-async def cmd_send_handler(message: types.Message):
+async def cmd_buy_handler(message: types.Message):
     logging.info(f"[CMD] text={message.text!r}")
 
     parsed = parse_buy_args(message.text)
@@ -239,7 +236,6 @@ async def cmd_send_handler(message: types.Message):
     nft_title = nft_data["full"]
     username = BOT_USERNAME or "work_vllw_bot"
 
-    # Формируем кнопки
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
