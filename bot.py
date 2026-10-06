@@ -87,7 +87,7 @@ async def cmd_buy(message: types.Message):
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"decline_{message.from_user.id}"),
-        InlineKeyboardButton(text="✅ Принять", callback_data=f"accept_{message.from_user.id}")
+        InlineKeyboardButton(text="✅ ТЕЕЕЕСТПринять", callback_data=f"accept_{message.from_user.id}")
     )
 
     deal_id = str(message.from_user.id)
