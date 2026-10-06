@@ -129,9 +129,15 @@ def parse_buy_args(text):
     if len(args) >= 2 and args[-1].lower() == "eu":
         lang = "en"
         args = args[:-1]
-    if len(args) < 4:
+
+    # Если первое слово — команда (buy, /buy, .buy), убираем его
+    if args and args[0].lower().lstrip("/.") == "buy":
+        args = args[1:]
+
+    if len(args) < 3:
         return None
-    return lang, args[1], args[2], args[3].upper()
+
+    return lang, args[0], args[1], args[2].upper()
 
 
 def build_offer_text(t, nft_title, amount, currency, nft_link):
