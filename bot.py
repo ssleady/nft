@@ -20,16 +20,8 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise SystemExit("❌ BOT_TOKEN не задан. Задай его в переменных окружения.")
-
-# Владелец бота — получает приоритетные уведомления
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "ВСТАВЬ_ТОКЕН")
 OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))
-
-# Пользователи, которым разрешено пользоваться ботом (пусто = все, кто написал /start)
-ALLOWED_OWNERS = set()
-
 RECIPIENT_USERNAME = "vvl_society"
 
 OFFER_TTL_SECONDS = 6 * 60 * 60
@@ -39,8 +31,8 @@ MEDIA_DIR = "media"
 MAX_MESSAGE_AGE_SECONDS = 300
 MEDIA_CLEANUP_INTERVAL = 5 * 60
 
-# ✅ Только эти bc_id обрабатываются. Пусто = все.
-ALLOWED_BC_IDS = set()
+# ✅ Только эти bc_id обрабатываются
+ALLOWED_BC_IDS = set()  # пусто = все
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,8 +53,6 @@ save_mode_enabled = True
 # ================= БАЗА ДАННЫХ =================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
-
-    # Таблица сообщений
     conn.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,41 +80,8 @@ def init_db():
         conn.execute("ALTER TABLE messages ADD COLUMN media_path TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
-
-    # Таблица владельцев bc_id — привязка bc_id → user_id (сохраняется в БД)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS business_owners (
-            bc_id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            username TEXT,
-            first_name TEXT,
-            connected_at TEXT
-        )
-    """)
-
     conn.commit()
     conn.close()
-
-
-def db_save_business_owner(bc_id, user_id, username, first_name):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        INSERT OR REPLACE INTO business_owners
-        (bc_id, user_id, username, first_name, connected_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (bc_id, user_id, username, first_name, datetime.now(timezone.utc).isoformat()))
-    conn.commit()
-    conn.close()
-
-
-def db_get_bc_ids_for_user(user_id):
-    """Возвращает список bc_id, принадлежащих пользователю."""
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("""
-        SELECT bc_id FROM business_owners WHERE user_id = ?
-    """, (user_id,)).fetchall()
-    conn.close()
-    return [r[0] for r in rows]
 
 
 def db_save_message(bc_id, chat_id, message_id, user_id, username, first_name,
@@ -180,50 +137,38 @@ def db_update_text(bc_id, chat_id, message_id, new_text):
     return old_text
 
 
-def db_get_last_deleted_for_bcs(bc_ids, limit=10):
-    """Удалённые только для указанных bc_id."""
-    if not bc_ids:
-        return []
-    placeholders = ",".join("?" * len(bc_ids))
+def db_get_last_deleted(limit=10):
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(f"""
+    rows = conn.execute("""
         SELECT username, first_name, text, date, chat_id
         FROM messages
-        WHERE is_deleted = 1 AND bc_id IN ({placeholders})
+        WHERE is_deleted = 1
         ORDER BY id DESC LIMIT ?
-    """, (*bc_ids, limit)).fetchall()
+    """, (limit,)).fetchall()
     conn.close()
     return rows
 
 
-def db_get_last_edited_for_bcs(bc_ids, limit=10):
-    """Правки только для указанных bc_id."""
-    if not bc_ids:
-        return []
-    placeholders = ",".join("?" * len(bc_ids))
+def db_get_last_edited(limit=10):
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(f"""
+    rows = conn.execute("""
         SELECT username, first_name, old_text, text, date
         FROM messages
-        WHERE is_edited = 1 AND bc_id IN ({placeholders})
+        WHERE is_edited = 1
         ORDER BY id DESC LIMIT ?
-    """, (*bc_ids, limit)).fetchall()
+    """, (limit,)).fetchall()
     conn.close()
     return rows
 
 
-def db_search_for_bcs(bc_ids, query, limit=10):
-    """Поиск только для указанных bc_id."""
-    if not bc_ids:
-        return []
-    placeholders = ",".join("?" * len(bc_ids))
+def db_search(query, limit=10):
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(f"""
+    rows = conn.execute("""
         SELECT username, first_name, text, date
         FROM messages
-        WHERE text LIKE ? AND text IS NOT NULL AND bc_id IN ({placeholders})
+        WHERE text LIKE ? AND text IS NOT NULL
         ORDER BY id DESC LIMIT ?
-    """, (f"%{query}%", *bc_ids, limit)).fetchall()
+    """, (f"%{query}%", limit)).fetchall()
     conn.close()
     return rows
 
@@ -250,7 +195,7 @@ TEXTS = {
         "declined": "❌ <b>Предложение отклонено</b>",
         "expired": "❌ <b>Сделка отклонена</b>",
         "alert_title": (
-            "⚠️ Внимание!\n\n"
+            "⚠️ <b>Внимание!</b>\n\n"
             "Следуйте инструкции, чтобы не потерять подарок и получить оплату."
         ),
         "deal_lost": "⚠️ Ошибка: данные о сделке утеряны.",
@@ -292,7 +237,7 @@ TEXTS = {
         "declined": "❌ <b>Offer declined</b>",
         "expired": "❌ <b>Deal expired</b>",
         "alert_title": (
-            "⚠️ Attention!\n\n"
+            "⚠️ <b>Attention!</b>\n\n"
             "Follow the instructions to not lose the gift and receive payment."
         ),
         "deal_lost": "⚠️ Error: deal data lost.",
@@ -619,11 +564,11 @@ def build_notification_keyboard(user_id, username=None):
     return b.as_markup()
 
 
-async def send_media_to_owner(owner_id, media_path, media_type, notification, kb):
+async def send_media_to_owner(media_path, media_type, notification, kb):
     if not media_path or not os.path.exists(media_path):
         try:
             await bot.send_message(
-                owner_id, notification,
+                OWNER_ID, notification,
                 parse_mode="HTML",
                 reply_markup=kb,
                 disable_web_page_preview=True,
@@ -636,31 +581,31 @@ async def send_media_to_owner(owner_id, media_path, media_type, notification, kb
 
     try:
         if media_type == "photo":
-            await bot.send_photo(owner_id, file, caption=notification[:1024],
+            await bot.send_photo(OWNER_ID, file, caption=notification[:1024],
                                  parse_mode="HTML", reply_markup=kb)
         elif media_type in ("video", "video_note", "animation"):
-            await bot.send_video(owner_id, file, caption=notification[:1024],
+            await bot.send_video(OWNER_ID, file, caption=notification[:1024],
                                  parse_mode="HTML", reply_markup=kb)
         elif media_type == "voice":
-            await bot.send_voice(owner_id, file, caption=notification[:1024],
+            await bot.send_voice(OWNER_ID, file, caption=notification[:1024],
                                  parse_mode="HTML", reply_markup=kb)
         elif media_type == "audio":
-            await bot.send_audio(owner_id, file, caption=notification[:1024],
+            await bot.send_audio(OWNER_ID, file, caption=notification[:1024],
                                  parse_mode="HTML", reply_markup=kb)
         elif media_type == "document":
-            await bot.send_document(owner_id, file, caption=notification[:1024],
+            await bot.send_document(OWNER_ID, file, caption=notification[:1024],
                                     parse_mode="HTML", reply_markup=kb)
         elif media_type == "sticker":
-            await bot.send_sticker(owner_id, file, reply_markup=kb)
-            await bot.send_message(owner_id, notification, parse_mode="HTML")
+            await bot.send_sticker(OWNER_ID, file, reply_markup=kb)
+            await bot.send_message(OWNER_ID, notification, parse_mode="HTML")
         else:
-            await bot.send_document(owner_id, file, caption=notification[:1024],
+            await bot.send_document(OWNER_ID, file, caption=notification[:1024],
                                     parse_mode="HTML", reply_markup=kb)
     except Exception as e:
         logging.error(f"send media fail: {e}")
         try:
             await bot.send_message(
-                owner_id, notification,
+                OWNER_ID, notification,
                 parse_mode="HTML",
                 reply_markup=kb,
                 disable_web_page_preview=True,
@@ -679,8 +624,8 @@ async def cmd_start(message: Message):
         "📌 <b>Как пользоваться:</b>\n"
         "Напиши в Business-чате:\n"
         "<code>.buy https://t.me/nft/Название-Номер 1000 STARS</code>\n\n"
-        "💾 <b>Save Mode включён.</b> Уведомления об удалениях и правках "
-        "приходят <b>только тебе</b> — по твоим Business-подключениям.\n\n"
+        "💾 <b>Save Mode включён.</b> Медиа скачивается локально и "
+        "очищается каждые 5 минут.\n\n"
         "📋 <b>Команды:</b>\n"
         "/deleted — последние удалённые\n"
         "/edits — последние правки\n"
@@ -694,7 +639,6 @@ async def cmd_start(message: Message):
 @dp.message(Command("savemode"))
 async def cmd_savemode(message: Message):
     global save_mode_enabled
-    # Разрешаем только владельцу бота
     if message.from_user.id != OWNER_ID:
         return
     args = message.text.split()
@@ -715,34 +659,12 @@ async def cmd_savemode(message: Message):
 
 @dp.message(Command("deleted"))
 async def cmd_deleted(message: Message):
-    user_id = message.from_user.id
-
-    # Получаем bc_id, принадлежащие этому пользователю
-    user_bc_ids = db_get_bc_ids_for_user(user_id)
-
-    # Владелец бота — видит всё
-    if user_id == OWNER_ID:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute("""
-            SELECT username, first_name, text, date, chat_id
-            FROM messages
-            WHERE is_deleted = 1
-            ORDER BY id DESC LIMIT 10
-        """).fetchall()
-        conn.close()
-    else:
-        if not user_bc_ids:
-            await message.answer(
-                "⚠️ У тебя нет активных Business-подключений.\n"
-                "Подключи бота в: Настройки → Telegram Business → Чат-боты"
-            )
-            return
-        rows = db_get_last_deleted_for_bcs(user_bc_ids, 10)
-
+    if message.from_user.id != OWNER_ID:
+        return
+    rows = db_get_last_deleted(10)
     if not rows:
         await message.answer("🗑 Удалённых сообщений нет")
         return
-
     result = "🗑 <b>Последние удалённые:</b>\n\n"
     for username, first_name, text, date, chat_id in rows:
         result += (
@@ -754,31 +676,12 @@ async def cmd_deleted(message: Message):
 
 @dp.message(Command("edits"))
 async def cmd_edits(message: Message):
-    user_id = message.from_user.id
-    user_bc_ids = db_get_bc_ids_for_user(user_id)
-
-    if user_id == OWNER_ID:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute("""
-            SELECT username, first_name, old_text, text, date
-            FROM messages
-            WHERE is_edited = 1
-            ORDER BY id DESC LIMIT 10
-        """).fetchall()
-        conn.close()
-    else:
-        if not user_bc_ids:
-            await message.answer(
-                "⚠️ У тебя нет активных Business-подключений.\n"
-                "Подключи бота в: Настройки → Telegram Business → Чат-боты"
-            )
-            return
-        rows = db_get_last_edited_for_bcs(user_bc_ids, 10)
-
+    if message.from_user.id != OWNER_ID:
+        return
+    rows = db_get_last_edited(10)
     if not rows:
         await message.answer("✏️ Правок не найдено")
         return
-
     result = "✏️ <b>Последние правки:</b>\n\n"
     for username, first_name, old, new, date in rows:
         result += (
@@ -791,35 +694,16 @@ async def cmd_edits(message: Message):
 
 @dp.message(Command("search"))
 async def cmd_search(message: Message):
-    user_id = message.from_user.id
-    user_bc_ids = db_get_bc_ids_for_user(user_id)
-
+    if message.from_user.id != OWNER_ID:
+        return
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer("Использование: /search текст")
         return
-
-    if user_id == OWNER_ID:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute("""
-            SELECT username, first_name, text, date
-            FROM messages
-            WHERE text LIKE ? AND text IS NOT NULL
-            ORDER BY id DESC LIMIT 10
-        """, (f"%{args[1]}%",)).fetchall()
-        conn.close()
-    else:
-        if not user_bc_ids:
-            await message.answer(
-                "⚠️ У тебя нет активных Business-подключений."
-            )
-            return
-        rows = db_search_for_bcs(user_bc_ids, args[1], 10)
-
+    rows = db_search(args[1], 10)
     if not rows:
         await message.answer(f"🔍 Ничего не найдено по запросу: {args[1]}")
         return
-
     result = f"🔍 <b>Найдено по «{args[1]}»:</b>\n\n"
     for username, first_name, text, date in rows:
         result += (
@@ -910,14 +794,6 @@ async def on_edited_business(message: Message):
     if (old_text or "").strip() == (new_text or "").strip():
         return
 
-    # Определяем владельца bc_id
-    conn = sqlite3.connect(DB_PATH)
-    owner_row = conn.execute(
-        "SELECT user_id FROM business_owners WHERE bc_id = ?", (bc_id,)
-    ).fetchone()
-    conn.close()
-    owner_id = owner_row[0] if owner_row else OWNER_ID
-
     user = message.from_user
     notification = build_edited_notification(
         username=user.username if user else "?",
@@ -934,7 +810,7 @@ async def on_edited_business(message: Message):
 
     try:
         await bot.send_message(
-            owner_id, notification,
+            OWNER_ID, notification,
             parse_mode="HTML",
             reply_markup=kb,
             disable_web_page_preview=True,
@@ -953,14 +829,6 @@ async def on_deleted_business(event: BusinessMessagesDeleted):
 
     if ALLOWED_BC_IDS and bc_id not in ALLOWED_BC_IDS:
         return
-
-    # Определяем владельца bc_id
-    conn = sqlite3.connect(DB_PATH)
-    owner_row = conn.execute(
-        "SELECT user_id FROM business_owners WHERE bc_id = ?", (bc_id,)
-    ).fetchone()
-    conn.close()
-    owner_id = owner_row[0] if owner_row else OWNER_ID
 
     for msg_id in event.message_ids:
         row = db_get_message(bc_id, chat_id, msg_id)
@@ -988,7 +856,7 @@ async def on_deleted_business(event: BusinessMessagesDeleted):
             username=username,
         )
 
-        await send_media_to_owner(owner_id, media_path, media_type, notification, kb)
+        await send_media_to_owner(media_path, media_type, notification, kb)
 
 
 # ================= ОБРАБОТКА .buy =================
@@ -1085,16 +953,8 @@ async def handle_regular_buy(message: Message):
 # ================= BUSINESS CONNECTION =================
 @dp.business_connection()
 async def on_business_connection(conn: BusinessConnection):
-    # Сохраняем владельца bc_id в БД
-    user = conn.user
-    db_save_business_owner(
-        bc_id=conn.id,
-        user_id=user.id,
-        username=user.username or "",
-        first_name=user.first_name or "",
-    )
     logging.info(
-        f"[BUSINESS CONNECTION] bc_id={conn.id}, owner={user.id}, "
+        f"[BUSINESS CONNECTION] id={conn.id}, user={conn.user.id}, "
         f"can_reply={conn.rights.can_reply}, can_read={conn.rights.can_read_messages}"
     )
 
@@ -1138,11 +998,28 @@ async def process_accept(cb: CallbackQuery):
 
     stop_timer(deal_id)
 
-    # ✅ Алерт с «Внимание!»
-    await cb.answer(text=t["alert_title"], show_alert=True)
+    # 1. Тихий ответ — БЕЗ всплывающего окна
+    await cb.answer()
 
+    # 2. Показываем «Внимание!» В САМОМ СООБЩЕНИИ
+    try:
+        if deal["bc_id"]:
+            await bot.edit_message_text(
+                text=t["alert_title"],
+                business_connection_id=deal["bc_id"],
+                chat_id=deal["chat_id"],
+                message_id=int(deal_id.split("_")[1]),
+                parse_mode="HTML",
+            )
+        else:
+            await cb.message.edit_text(t["alert_title"], parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"warning edit fail: {e}")
+
+    # 3. Пауза 2 секунды
     await asyncio.sleep(2)
 
+    # 4. Финальный экран
     text = build_final_text(t, deal)
     kb = build_final_keyboard(t, deal, deal_id, lang).as_markup()
 
@@ -1201,7 +1078,7 @@ async def main():
     os.makedirs(MEDIA_DIR, exist_ok=True)
     logging.info(f"[DB] SQLite инициализирован: {DB_PATH}")
     logging.info(f"[MEDIA] Папка для медиа: {MEDIA_DIR}")
-    logging.info(f"[OWNER] Главный владелец: user_id={OWNER_ID}")
+    logging.info(f"[OWNER] Уведомления идут user_id={OWNER_ID}")
     logging.info(f"[FILTER] Сообщения старше {MAX_MESSAGE_AGE_SECONDS}s игнорируются")
     logging.info(f"[BC-FILTER] Разрешённые bc_id: {ALLOWED_BC_IDS or 'все'}")
 
