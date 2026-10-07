@@ -181,22 +181,26 @@ def format_currency(currency: str) -> str:
 def build_offer_text(t, nft_name, nft_number, nft_url, amount, currency, seconds_left,
                      author_name, author_id):
     """
-    Карточка:
-    Пользователь «Кирюха» предлагает вам
-    1000 Stars за подарок ViceCream #302,895.
-    Оффер действителен ещё 5 ч. 59 мин.
+    Карточка с СКРЫТОЙ ссылкой сверху (для превью Telegram).
+    - Ссылка первой строкой (маскируется превью)
+    - Имя автора кликабельно
+    - Название NFT кликабельно
     """
+    # Скрытая ссылка: zero-width space + сама ссылка → Telegram разворачивает превью
+    hidden_link = f'https://t.me/nft/{nft_name}-{nft_number}'
+
     # Название NFT — ссылка на NFT
     nft_display = (
         f'<a href="{nft_url}">{nft_name} #{format_number(nft_number)}</a>'
     )
 
-    # Ник автора — ссылка на профиль (кликабельный)
+    # Ник автора — ссылка на профиль
     author_display = f'<a href="tg://user?id={author_id}">{author_name}</a>'
 
     cur = format_currency(currency)
 
     return (
+        f"{hidden_link}\n"
         f"{t['offer'].format(author=author_display)}\n"
         f"<b>{amount} {cur}</b> {t['for_gift']} {nft_display}.\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
@@ -290,7 +294,7 @@ async def offer_timer(deal_id: str):
                         message_id=deal["message_id"],
                         reply_markup=kb,
                         parse_mode="HTML",
-                        disable_web_page_preview=True,
+                        disable_web_page_preview=False,
                     )
             except Exception as e:
                 if "MESSAGE_ID_INVALID" not in str(e):
@@ -389,12 +393,12 @@ async def process_buy(message: Message, bc_id):
                 message_id=message.message_id,
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=True,
+                disable_web_page_preview=False,
             )
         else:
             await message.answer(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=True,
+                parse_mode="HTML", disable_web_page_preview=False,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -424,7 +428,6 @@ async def process_buy(message: Message, bc_id):
 
 # ================= ОБРАБОТКА .test =================
 async def process_test(message: Message, bc_id):
-    """Аналог .buy, но БЕЗ кнопок."""
     parsed = parse_buy_args(message.text)
     t = TEXTS["ru"]
 
@@ -489,12 +492,12 @@ async def process_test(message: Message, bc_id):
                 chat_id=message.chat.id,
                 message_id=message.message_id,
                 parse_mode="HTML",
-                disable_web_page_preview=True,
+                disable_web_page_preview=False,
             )
         else:
             await message.answer(
                 text=text,
-                parse_mode="HTML", disable_web_page_preview=True,
+                parse_mode="HTML", disable_web_page_preview=False,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -619,12 +622,12 @@ async def process_accept(cb: CallbackQuery):
                 message_id=deal["message_id"],
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
             )
         else:
             await cb.message.edit_text(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=False,
+                parse_mode="HTML", disable_web_page_preview=True,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -660,7 +663,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test (кликабельные ник и NFT)")
+    logging.info("[START] Bot started — .buy + .test (превью NFT)")
 
     app = web.Application()
     app.router.add_get("/", handle)
