@@ -143,8 +143,7 @@ def parse_nft_link(url):
     return {"name": name, "number": number, "full": f"{name} #{number}", "url": url}
 
 
-def parse_buy_args(text, prefix=".buy"):
-    """Парсит аргументы: <prefix> <ссылка> <сумма> <валюта> [eu]"""
+def parse_buy_args(text):
     args = text.split()
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
@@ -212,7 +211,7 @@ async def offer_timer(deal_id: str):
     if not deal:
         return
     t = TEXTS.get(deal["lang"], TEXTS["ru"])
-    has_kb = deal.get("has_kb", True)  # ✅ флаг: есть ли кнопки
+    has_kb = deal.get("has_kb", True)
 
     try:
         while True:
@@ -245,7 +244,6 @@ async def offer_timer(deal_id: str):
                     t, deal["title"], deal["amount"], deal["currency"],
                     deal["link"], seconds_left,
                 )
-                # ✅ Если has_kb = False — без кнопок
                 kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup() if has_kb else None
 
                 if deal["bc_id"]:
@@ -271,6 +269,49 @@ def stop_timer(deal_id: str):
         task.cancel()
 
 
+# ================= УВЕДОМЛЕНИЕ ПОЛУЧАТЕЛЮ =================
+async def notify_receiver(message: Message, bc_id, nft_title, amount, currency, nft_link, kind="buy"):
+    """
+    Уведомляет получателя о новом оффере.
+    chat_id в Business = user_id собеседника (получателя).
+    Если sender_id != chat_id → значит пишет НЕ владелец → уведомляем владельца.
+    """
+    sender_id = message.from_user.id if message.from_user else 0
+    receiver_id = message.chat.id
+
+    # Если пишет сам себе (Saved Messages) — не уведомляем
+    if sender_id == receiver_id:
+        return
+
+    # Проверяем: есть ли у получателя активное Business-подключение?
+    # (по наличию bc_id и тому, что это не Saved Messages)
+    sender = message.from_user
+    sender_name = sender.first_name or ""
+    sender_un = f"@{sender.username}" if sender.username else f"[{sender.id}]"
+
+    header = "📩 <b>Новый оффер</b>" if kind == "buy" else "📩 <b>Новый запрос (.test)</b>"
+
+    text = (
+        f"{header}\n\n"
+        f"👤 От: {sender_name} ({sender_un})\n\n"
+        f"🎁 NFT: <b>{nft_title}</b>\n"
+        f"💰 Сумма: <b>{amount} {currency}</b>\n"
+        f"🔗 {nft_link}\n\n"
+        f"⚠️ Действия доступны только отправителю."
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=receiver_id,
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=False,
+        )
+        logging.info(f"[NOTIFY] Отправлено в {receiver_id}")
+    except Exception as e:
+        logging.error(f"[NOTIFY] fail to {receiver_id}: {e}")
+
+
 # ================= /start =================
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -279,17 +320,18 @@ async def cmd_start(message: Message):
         "👋 <b>Привет!</b>\n\n"
         "Я — бот для автоматизации Telegram Business.\n\n"
         "📌 <b>Команды:</b>\n"
-        "<code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — с кнопками\n"
-        "<code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — без кнопок\n\n"
+        "<code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — оффер с кнопками\n"
+        "<code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — карточка без кнопок\n\n"
         "<b>Пример:</b>\n"
-        "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>",
+        "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>\n\n"
+        "💡 Если тебе пришёл оффер — ты получишь уведомление в этот чат.",
         parse_mode="HTML",
     )
 
 
 # ================= ОБРАБОТКА .buy =================
 async def process_buy(message: Message, bc_id):
-    parsed = parse_buy_args(message.text, prefix=".buy")
+    parsed = parse_buy_args(message.text)
     t = TEXTS["ru"]
 
     if not parsed:
@@ -374,11 +416,15 @@ async def process_buy(message: Message, bc_id):
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
 
+    # ✅ Уведомление получателю
+    if bc_id:
+        await notify_receiver(message, bc_id, nft_title, amount, currency, nft_link, kind="buy")
+
 
 # ================= ОБРАБОТКА .test =================
 async def process_test(message: Message, bc_id):
     """Аналог .buy, но БЕЗ кнопок Отклонить/Принять."""
-    parsed = parse_buy_args(message.text, prefix=".test")
+    parsed = parse_buy_args(message.text)
     t = TEXTS["ru"]
 
     if not parsed:
@@ -424,6 +470,7 @@ async def process_test(message: Message, bc_id):
     expires_at = time.time() + OFFER_TTL_SECONDS
 
     text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
+
     # ✅ БЕЗ КНОПОК
     try:
         if bc_id:
@@ -456,10 +503,14 @@ async def process_test(message: Message, bc_id):
         "bc_id": bc_id,
         "expires_at": expires_at,
         "message_id": message.message_id,
-        "has_kb": False,  # ✅ без кнопок
+        "has_kb": False,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
+
+    # ✅ Уведомление получателю
+    if bc_id:
+        await notify_receiver(message, bc_id, nft_title, amount, currency, nft_link, kind="test")
 
 
 # ================= ЕДИНЫЙ ОБРАБОТЧИК BUSINESS =================
@@ -600,7 +651,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test")
+    logging.info("[START] Bot started — .buy + .test + notify")
 
     app = web.Application()
     app.router.add_get("/", handle)
