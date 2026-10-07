@@ -52,8 +52,7 @@ TEXTS = {
             "⚠️ <b>Неверная ссылка на NFT.</b>\n\n"
             "Формат: <code>https://t.me/nft/Название-Номер</code>"
         ),
-        "header": "Telegram",
-        "offer": "Пользователь предлагает вам",
+        "offer": "Пользователь «{name}» предлагает вам",
         "for_gift": "за подарок",
         "valid_for": "Оффер действителен ещё",
         "decline_btn": "❌ Отклонить",
@@ -94,10 +93,9 @@ TEXTS = {
             "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>"
         ),
         "invalid_link": "⚠️ <b>Invalid NFT link.</b>",
-        "header": "Telegram",
-        "offer": "A user offers you",
+        "offer": "User «{name}» is offering you",
         "for_gift": "for the gift",
-        "valid_for": "Offer valid for another",
+        "valid_for": "This offer expires in",
         "decline_btn": "❌ Decline",
         "accept_btn": "✅ Accept",
         "declined": "❌ <b>Offer declined</b>",
@@ -164,12 +162,42 @@ def format_time_left(seconds_left):
     return f"{minutes} мин."
 
 
-def build_offer_text(t, nft_title, amount, currency, nft_link, seconds_left):
+def format_number(n: str) -> str:
+    """Добавляет запятые в числе: '159760' → '159,760'."""
+    return f"{int(n):,}".replace(",", ",")
+
+
+def format_currency(currency: str) -> str:
+    """STARS → Stars, TON → TON, GRAM → GRAM."""
+    c = currency.upper()
+    if c in ("STARS", "STAR"):
+        return "Stars"
+    return currency
+
+
+def build_offer_text(t, nft_title, nft_url, amount, currency, seconds_left, author_name):
+    """
+    Карточка оффера.
+    - Имя автора
+    - Название NFT с запятой в номере (кликабельное)
+    - Stars с маленькой s
+    - Без заголовка Telegram
+    """
+    # Парсим название и номер из nft_title ("Liberty Figure #159760")
+    parts = nft_title.rsplit("#", 1)
+    if len(parts) == 2:
+        nft_name = parts[0].strip()
+        nft_num = parts[1].strip()
+        nft_num_fmt = format_number(nft_num)
+        nft_display = f'{nft_name} <a href="{nft_url}">#{nft_num_fmt}</a>'
+    else:
+        nft_display = f'<a href="{nft_url}">{nft_title}</a>'
+
+    cur = format_currency(currency)
+
     return (
-        f"<b>{t['header']}</b>\n"
-        f"<b>{nft_title}</b>\n\n"
-        f"{t['offer']}\n"
-        f"<b>{amount} {currency}</b> {t['for_gift']} {nft_link}.\n\n"
+        f"{t['offer'].format(name=author_name)}\n"
+        f"<b>{amount} {cur}</b> {t['for_gift']} {nft_display}.\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
     )
 
@@ -187,14 +215,14 @@ def build_final_text(t, deal):
     return (
         f"<b>{t['deal_title']}</b>\n\n"
         f"Ордер #TG-D721BSTP\n\n"
-        f"{t['buyer_reserved']} <b>{deal['amount']} {deal['currency']}</b> {t['via_escrow']}\n"
+        f"{t['buyer_reserved']} <b>{deal['amount']} {format_currency(deal['currency'])}</b> {t['via_escrow']}\n"
         f"{t['escrow_text']}\n\n"
         f"<b>{t['instructions']}</b>\n"
         f"{t['step1']}\n"
         f"{t['step2_prefix']} <b>{deal['title']}</b>\n"
         f"{t['step3']}\n\n"
         f"{t['link_to_gift']}: {deal['link']}\n\n"
-        f"{t['final_note'].format(amount=deal['amount'], currency=deal['currency'])}"
+        f"{t['final_note'].format(amount=deal['amount'], currency=format_currency(deal['currency']))}"
     )
 
 
@@ -241,8 +269,13 @@ async def offer_timer(deal_id: str):
 
             try:
                 text = build_offer_text(
-                    t, deal["title"], deal["amount"], deal["currency"],
-                    deal["link"], seconds_left,
+                    t,
+                    deal["title"],
+                    deal["link"],
+                    deal["amount"],
+                    deal["currency"],
+                    seconds_left,
+                    deal["author_name"],
                 )
                 kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup() if has_kb else None
 
@@ -254,7 +287,7 @@ async def offer_timer(deal_id: str):
                         message_id=deal["message_id"],
                         reply_markup=kb,
                         parse_mode="HTML",
-                        disable_web_page_preview=False,
+                        disable_web_page_preview=True,
                     )
             except Exception as e:
                 if "MESSAGE_ID_INVALID" not in str(e):
@@ -329,10 +362,11 @@ async def process_buy(message: Message, bc_id):
         return
 
     nft_title = nft_data["full"]
+    author_name = message.from_user.first_name if message.from_user else "?"
     deal_id = f"{message.chat.id}_{message.message_id}"
     expires_at = time.time() + OFFER_TTL_SECONDS
 
-    text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
+    text = build_offer_text(t, nft_title, nft_link, amount, currency, OFFER_TTL_SECONDS, author_name)
     kb = build_offer_keyboard(t, deal_id, lang).as_markup()
 
     try:
@@ -344,12 +378,12 @@ async def process_buy(message: Message, bc_id):
                 message_id=message.message_id,
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
             )
         else:
             await message.answer(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=False,
+                parse_mode="HTML", disable_web_page_preview=True,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -368,6 +402,7 @@ async def process_buy(message: Message, bc_id):
         "expires_at": expires_at,
         "message_id": message.message_id,
         "has_kb": True,
+        "author_name": author_name,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -418,10 +453,11 @@ async def process_test(message: Message, bc_id):
         return
 
     nft_title = nft_data["full"]
+    author_name = message.from_user.first_name if message.from_user else "?"
     deal_id = f"{message.chat.id}_{message.message_id}"
     expires_at = time.time() + OFFER_TTL_SECONDS
 
-    text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
+    text = build_offer_text(t, nft_title, nft_link, amount, currency, OFFER_TTL_SECONDS, author_name)
 
     try:
         if bc_id:
@@ -431,12 +467,12 @@ async def process_test(message: Message, bc_id):
                 chat_id=message.chat.id,
                 message_id=message.message_id,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
             )
         else:
             await message.answer(
                 text=text,
-                parse_mode="HTML", disable_web_page_preview=False,
+                parse_mode="HTML", disable_web_page_preview=True,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -455,6 +491,7 @@ async def process_test(message: Message, bc_id):
         "expires_at": expires_at,
         "message_id": message.message_id,
         "has_kb": False,
+        "author_name": author_name,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -598,7 +635,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test (без уведомлений)")
+    logging.info("[START] Bot started — .buy + .test (новый формат карточки)")
 
     app = web.Application()
     app.router.add_get("/", handle)
