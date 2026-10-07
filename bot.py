@@ -52,6 +52,7 @@ TEXTS = {
             "⚠️ <b>Неверная ссылка на NFT.</b>\n\n"
             "Формат: <code>https://t.me/nft/Название-Номер</code>"
         ),
+        "header": "Telegram",
         "offer": "Пользователь {author} предлагает вам",
         "for_gift": "за подарок",
         "valid_for": "Оффер действителен ещё",
@@ -93,6 +94,7 @@ TEXTS = {
             "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>"
         ),
         "invalid_link": "⚠️ <b>Invalid NFT link.</b>",
+        "header": "Telegram",
         "offer": "User {author} is offering you",
         "for_gift": "for the gift",
         "valid_for": "This offer expires in",
@@ -163,7 +165,6 @@ def format_time_left(seconds_left):
 
 
 def format_number(n: str) -> str:
-    """'159760' → '159,760'."""
     try:
         return f"{int(n):,}"
     except ValueError:
@@ -171,7 +172,6 @@ def format_number(n: str) -> str:
 
 
 def format_currency(currency: str) -> str:
-    """STARS → Stars, остальное без изменения."""
     c = currency.upper()
     if c in ("STARS", "STAR"):
         return "Stars"
@@ -180,29 +180,18 @@ def format_currency(currency: str) -> str:
 
 def build_offer_text(t, nft_name, nft_number, nft_url, amount, currency, seconds_left,
                      author_name, author_id):
-    """
-    Карточка с СКРЫТОЙ ссылкой сверху (для превью Telegram).
-    - Ссылка первой строкой (маскируется превью)
-    - Имя автора кликабельно
-    - Название NFT кликабельно
-    """
-    # Скрытая ссылка: zero-width space + сама ссылка → Telegram разворачивает превью
-    hidden_link = f'https://t.me/nft/{nft_name}-{nft_number}'
-
-    # Название NFT — ссылка на NFT
+    """Карточка оффера — как было."""
     nft_display = (
         f'<a href="{nft_url}">{nft_name} #{format_number(nft_number)}</a>'
     )
-
-    # Ник автора — ссылка на профиль
     author_display = f'<a href="tg://user?id={author_id}">{author_name}</a>'
-
     cur = format_currency(currency)
 
     return (
-        f"{hidden_link}\n"
+        f"<b>{t['header']}</b>\n"
+        f"{nft_display}\n\n"
         f"{t['offer'].format(author=author_display)}\n"
-        f"<b>{amount} {cur}</b> {t['for_gift']} {nft_display}.\n"
+        f"<b>{amount} {cur}</b> {t['for_gift']} {nft_display}.\n\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
     )
 
@@ -294,7 +283,7 @@ async def offer_timer(deal_id: str):
                         message_id=deal["message_id"],
                         reply_markup=kb,
                         parse_mode="HTML",
-                        disable_web_page_preview=False,
+                        disable_web_page_preview=True,
                     )
             except Exception as e:
                 if "MESSAGE_ID_INVALID" not in str(e):
@@ -393,12 +382,12 @@ async def process_buy(message: Message, bc_id):
                 message_id=message.message_id,
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
             )
         else:
             await message.answer(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=False,
+                parse_mode="HTML", disable_web_page_preview=True,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -492,12 +481,12 @@ async def process_test(message: Message, bc_id):
                 chat_id=message.chat.id,
                 message_id=message.message_id,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                disable_web_page_preview=True,
             )
         else:
             await message.answer(
                 text=text,
-                parse_mode="HTML", disable_web_page_preview=False,
+                parse_mode="HTML", disable_web_page_preview=True,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -663,7 +652,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test (превью NFT)")
+    logging.info("[START] Bot started — .buy + .test")
 
     app = web.Application()
     app.router.add_get("/", handle)
