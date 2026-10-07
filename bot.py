@@ -228,7 +228,7 @@ async def offer_timer(deal_id: str):
                             text=t["expired"],
                             business_connection_id=deal["bc_id"],
                             chat_id=deal["chat_id"],
-                            message_id=deal["message_id"],
+                            message_id=deal["offer_message_id"],
                             parse_mode="HTML",
                         )
                 except Exception as e:
@@ -249,7 +249,7 @@ async def offer_timer(deal_id: str):
                         text=text,
                         business_connection_id=deal["bc_id"],
                         chat_id=deal["chat_id"],
-                        message_id=deal["message_id"],
+                        message_id=deal["offer_message_id"],
                         reply_markup=kb,
                         parse_mode="HTML",
                         disable_web_page_preview=False,
@@ -289,18 +289,16 @@ async def process_buy(message: Message, bc_id):
     if not parsed:
         try:
             if bc_id:
-                await bot.edit_message_text(
-                    text=t["usage"],
+                await bot.send_message(
                     business_connection_id=bc_id,
                     chat_id=message.chat.id,
-                    message_id=message.message_id,
+                    text=t["usage"],
                     parse_mode="HTML",
                 )
             else:
                 await message.answer(t["usage"], parse_mode="HTML")
         except Exception as e:
-            if "MESSAGE_ID_INVALID" not in str(e):
-                logging.error(f"usage edit fail: {e}")
+            logging.error(f"usage send fail: {e}")
         return
 
     lang, nft_link, amount, currency = parsed
@@ -310,18 +308,16 @@ async def process_buy(message: Message, bc_id):
     if not nft_data:
         try:
             if bc_id:
-                await bot.edit_message_text(
-                    text=t["invalid_link"],
+                await bot.send_message(
                     business_connection_id=bc_id,
                     chat_id=message.chat.id,
-                    message_id=message.message_id,
+                    text=t["invalid_link"],
                     parse_mode="HTML",
                 )
             else:
                 await message.answer(t["invalid_link"], parse_mode="HTML")
         except Exception as e:
-            if "MESSAGE_ID_INVALID" not in str(e):
-                logging.error(f"invalid_link edit fail: {e}")
+            logging.error(f"invalid_link send fail: {e}")
         return
 
     nft_title = nft_data["full"]
@@ -331,26 +327,30 @@ async def process_buy(message: Message, bc_id):
     text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
     kb = build_offer_keyboard(t, deal_id, lang).as_markup()
 
+    # ✅ Отправляем НОВОЕ сообщение (карточку) в чат — видят оба
+    sent_message = None
     try:
         if bc_id:
-            await bot.edit_message_text(
-                text=text,
+            sent_message = await bot.send_message(
                 business_connection_id=bc_id,
                 chat_id=message.chat.id,
-                message_id=message.message_id,
+                text=text,
                 reply_markup=kb,
                 parse_mode="HTML",
                 disable_web_page_preview=False,
             )
         else:
-            await message.answer(
-                text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=False,
+            sent_message = await message.answer(
+                text=text,
+                reply_markup=kb,
+                parse_mode="HTML",
+                disable_web_page_preview=False,
             )
     except Exception as e:
-        if "MESSAGE_ID_INVALID" not in str(e):
-            logging.error(f"offer edit fail: {e}")
+        logging.error(f"offer send fail: {e}")
         return
+
+    offer_message_id = sent_message.message_id if sent_message else message.message_id
 
     active_deals[deal_id] = {
         "link": nft_link,
@@ -362,7 +362,7 @@ async def process_buy(message: Message, bc_id):
         "chat_id": message.chat.id,
         "bc_id": bc_id,
         "expires_at": expires_at,
-        "message_id": message.message_id,
+        "offer_message_id": offer_message_id,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -419,7 +419,7 @@ async def process_decline(cb: CallbackQuery):
                 text=t["declined"],
                 business_connection_id=deal["bc_id"],
                 chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
+                message_id=deal["offer_message_id"],
                 parse_mode="HTML",
             )
         else:
@@ -450,7 +450,7 @@ async def process_accept(cb: CallbackQuery):
                 text=text,
                 business_connection_id=deal["bc_id"],
                 chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
+                message_id=deal["offer_message_id"],
                 reply_markup=kb,
                 parse_mode="HTML",
                 disable_web_page_preview=False,
@@ -477,7 +477,7 @@ async def process_confirm(cb: CallbackQuery):
                 text=t["deal_done"],
                 business_connection_id=deal["bc_id"],
                 chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
+                message_id=deal["offer_message_id"],
                 parse_mode="HTML",
             )
         else:
@@ -494,7 +494,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[DB] Save Mode удалён — только .buy")
+    logging.info("[START] Bot started — Variant 2 (send_message, оба видят)")
 
     app = web.Application()
     app.router.add_get("/", handle)
