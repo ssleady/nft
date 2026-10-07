@@ -187,10 +187,12 @@ def format_time_left(seconds_left):
 
 def build_offer_text(t, nft_title, amount, currency, nft_link, seconds_left, lang="ru"):
     cur = format_currency(currency, lang)
+    # Ссылка в первой строке — Telegram подтянет карточку NFT
+    # (карточка появится сверху или снизу — это решает Telegram).
     return (
+        f"{nft_link}\n\n"
         f"{t['offer']}\n"
-        f"<b>{amount} {cur}</b> {t['for_gift']} "
-        f"<a href=\"{nft_link}\">{nft_title}</a>.\n\n"
+        f"<b>{amount} {cur}</b> {t['for_gift']} {nft_title}.\n\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
     )
 
@@ -206,6 +208,7 @@ def build_offer_keyboard(t, deal_id, lang):
 
 def build_final_text(t, deal):
     return (
+        f"{deal['link']}\n\n"
         f"<b>{t['deal_title']}</b>\n\n"
         f"Ордер #TG-D721BSTP\n\n"
         f"{t['buyer_reserved']} <b>{deal['amount']} {deal['currency']}</b> {t['via_escrow']}\n"
@@ -213,9 +216,7 @@ def build_final_text(t, deal):
         f"<b>{t['instructions']}</b>\n"
         f"{t['step1']}\n"
         f"{t['step2_prefix']} <b>{deal['title']}</b>\n"
-        f"{t['step3']}\n\n"
-        f"{t['link_to_gift']}: {deal['link']}\n\n"
-        f"{t['final_note'].format(amount=deal['amount'], currency=deal['currency'])}"
+        f"{t['step3']}"
     )
 
 
