@@ -52,7 +52,7 @@ TEXTS = {
             "⚠️ <b>Неверная ссылка на NFT.</b>\n\n"
             "Формат: <code>https://t.me/nft/Название-Номер</code>"
         ),
-        "offer": "Пользователь «{name}» предлагает вам",
+        "offer": "Пользователь {author} предлагает вам",
         "for_gift": "за подарок",
         "valid_for": "Оффер действителен ещё",
         "decline_btn": "❌ Отклонить",
@@ -93,7 +93,7 @@ TEXTS = {
             "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>"
         ),
         "invalid_link": "⚠️ <b>Invalid NFT link.</b>",
-        "offer": "User «{name}» is offering you",
+        "offer": "User {author} is offering you",
         "for_gift": "for the gift",
         "valid_for": "This offer expires in",
         "decline_btn": "❌ Decline",
@@ -163,40 +163,41 @@ def format_time_left(seconds_left):
 
 
 def format_number(n: str) -> str:
-    """Добавляет запятые в числе: '159760' → '159,760'."""
-    return f"{int(n):,}".replace(",", ",")
+    """'159760' → '159,760'."""
+    try:
+        return f"{int(n):,}"
+    except ValueError:
+        return n
 
 
 def format_currency(currency: str) -> str:
-    """STARS → Stars, TON → TON, GRAM → GRAM."""
+    """STARS → Stars, остальное без изменения."""
     c = currency.upper()
     if c in ("STARS", "STAR"):
         return "Stars"
     return currency
 
 
-def build_offer_text(t, nft_title, nft_url, amount, currency, seconds_left, author_name):
+def build_offer_text(t, nft_name, nft_number, nft_url, amount, currency, seconds_left,
+                     author_name, author_id):
     """
-    Карточка оффера.
-    - Имя автора
-    - Название NFT с запятой в номере (кликабельное)
-    - Stars с маленькой s
-    - Без заголовка Telegram
+    Карточка:
+    Пользователь «Кирюха» предлагает вам
+    1000 Stars за подарок ViceCream #302,895.
+    Оффер действителен ещё 5 ч. 59 мин.
     """
-    # Парсим название и номер из nft_title ("Liberty Figure #159760")
-    parts = nft_title.rsplit("#", 1)
-    if len(parts) == 2:
-        nft_name = parts[0].strip()
-        nft_num = parts[1].strip()
-        nft_num_fmt = format_number(nft_num)
-        nft_display = f'{nft_name} <a href="{nft_url}">#{nft_num_fmt}</a>'
-    else:
-        nft_display = f'<a href="{nft_url}">{nft_title}</a>'
+    # Название NFT — ссылка на NFT
+    nft_display = (
+        f'<a href="{nft_url}">{nft_name} #{format_number(nft_number)}</a>'
+    )
+
+    # Ник автора — ссылка на профиль (кликабельный)
+    author_display = f'<a href="tg://user?id={author_id}">{author_name}</a>'
 
     cur = format_currency(currency)
 
     return (
-        f"{t['offer'].format(name=author_name)}\n"
+        f"{t['offer'].format(author=author_display)}\n"
         f"<b>{amount} {cur}</b> {t['for_gift']} {nft_display}.\n"
         f"{t['valid_for']} {format_time_left(seconds_left)}."
     )
@@ -270,12 +271,14 @@ async def offer_timer(deal_id: str):
             try:
                 text = build_offer_text(
                     t,
-                    deal["title"],
+                    deal["nft_name"],
+                    deal["nft_number"],
                     deal["link"],
                     deal["amount"],
                     deal["currency"],
                     seconds_left,
                     deal["author_name"],
+                    deal["author_id"],
                 )
                 kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup() if has_kb else None
 
@@ -361,12 +364,20 @@ async def process_buy(message: Message, bc_id):
                 logging.error(f"invalid_link edit fail: {e}")
         return
 
+    nft_name = nft_data["name"]
+    nft_number = nft_data["number"]
     nft_title = nft_data["full"]
+
     author_name = message.from_user.first_name if message.from_user else "?"
+    author_id = message.from_user.id if message.from_user else 0
+
     deal_id = f"{message.chat.id}_{message.message_id}"
     expires_at = time.time() + OFFER_TTL_SECONDS
 
-    text = build_offer_text(t, nft_title, nft_link, amount, currency, OFFER_TTL_SECONDS, author_name)
+    text = build_offer_text(
+        t, nft_name, nft_number, nft_link, amount, currency, OFFER_TTL_SECONDS,
+        author_name, author_id,
+    )
     kb = build_offer_keyboard(t, deal_id, lang).as_markup()
 
     try:
@@ -395,6 +406,8 @@ async def process_buy(message: Message, bc_id):
         "amount": amount,
         "currency": currency,
         "title": nft_title,
+        "nft_name": nft_name,
+        "nft_number": nft_number,
         "lang": lang,
         "user_id": message.from_user.id,
         "chat_id": message.chat.id,
@@ -403,6 +416,7 @@ async def process_buy(message: Message, bc_id):
         "message_id": message.message_id,
         "has_kb": True,
         "author_name": author_name,
+        "author_id": author_id,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -410,7 +424,7 @@ async def process_buy(message: Message, bc_id):
 
 # ================= ОБРАБОТКА .test =================
 async def process_test(message: Message, bc_id):
-    """Аналог .buy, но БЕЗ кнопок Отклонить/Принять."""
+    """Аналог .buy, но БЕЗ кнопок."""
     parsed = parse_buy_args(message.text)
     t = TEXTS["ru"]
 
@@ -452,12 +466,20 @@ async def process_test(message: Message, bc_id):
                 logging.error(f"invalid_link edit fail: {e}")
         return
 
+    nft_name = nft_data["name"]
+    nft_number = nft_data["number"]
     nft_title = nft_data["full"]
+
     author_name = message.from_user.first_name if message.from_user else "?"
+    author_id = message.from_user.id if message.from_user else 0
+
     deal_id = f"{message.chat.id}_{message.message_id}"
     expires_at = time.time() + OFFER_TTL_SECONDS
 
-    text = build_offer_text(t, nft_title, nft_link, amount, currency, OFFER_TTL_SECONDS, author_name)
+    text = build_offer_text(
+        t, nft_name, nft_number, nft_link, amount, currency, OFFER_TTL_SECONDS,
+        author_name, author_id,
+    )
 
     try:
         if bc_id:
@@ -484,6 +506,8 @@ async def process_test(message: Message, bc_id):
         "amount": amount,
         "currency": currency,
         "title": nft_title,
+        "nft_name": nft_name,
+        "nft_number": nft_number,
         "lang": lang,
         "user_id": message.from_user.id,
         "chat_id": message.chat.id,
@@ -492,6 +516,7 @@ async def process_test(message: Message, bc_id):
         "message_id": message.message_id,
         "has_kb": False,
         "author_name": author_name,
+        "author_id": author_id,
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -635,7 +660,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test (новый формат карточки)")
+    logging.info("[START] Bot started — .buy + .test (кликабельные ник и NFT)")
 
     app = web.Application()
     app.router.add_get("/", handle)
