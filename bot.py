@@ -50,7 +50,6 @@ TEXTS = {
             "⚠️ <b>Неверная ссылка на NFT.</b>\n\n"
             "Формат: <code>https://t.me/nft/Название-Номер</code>"
         ),
-        "header": "Telegram",
         "offer": "Пользователь предлагает вам",
         "for_gift": "за подарок",
         "valid_for": "Оффер действителен ещё",
@@ -92,7 +91,6 @@ TEXTS = {
             "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>"
         ),
         "invalid_link": "⚠️ <b>Invalid NFT link.</b>",
-        "header": "Telegram",
         "offer": "A user offers you",
         "for_gift": "for the gift",
         "valid_for": "Offer valid for another",
@@ -189,7 +187,6 @@ def format_time_left(seconds_left):
 
 def build_offer_text(t, nft_title, amount, currency, nft_link, seconds_left, lang="ru"):
     cur = format_currency(currency, lang)
-    # Ссылка скрыта в тексте, карточка NFT появится как превью
     return (
         f"{t['offer']}\n"
         f"<b>{amount} {cur}</b> {t['for_gift']} "
@@ -540,4 +537,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())    asyncio.run(main())
+    asyncio.run(main())
