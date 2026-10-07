@@ -20,7 +20,6 @@ if not BOT_TOKEN:
     raise SystemExit("❌ BOT_TOKEN не задан")
 
 RECIPIENT_USERNAME = "vvl_society"
-DEFAULT_TEST_LINK = "https://t.me/nft/ViceCream-30289"
 
 OFFER_TTL_SECONDS = 6 * 60 * 60
 TIMER_TICK = 60
@@ -144,7 +143,8 @@ def parse_nft_link(url):
     return {"name": name, "number": number, "full": f"{name} #{number}", "url": url}
 
 
-def parse_buy_args(text):
+def parse_buy_args(text, prefix=".buy"):
+    """Парсит аргументы: <prefix> <ссылка> <сумма> <валюта> [eu]"""
     args = text.split()
     lang = "ru"
     if len(args) >= 2 and args[-1].lower() == "eu":
@@ -212,6 +212,7 @@ async def offer_timer(deal_id: str):
     if not deal:
         return
     t = TEXTS.get(deal["lang"], TEXTS["ru"])
+    has_kb = deal.get("has_kb", True)  # ✅ флаг: есть ли кнопки
 
     try:
         while True:
@@ -244,7 +245,9 @@ async def offer_timer(deal_id: str):
                     t, deal["title"], deal["amount"], deal["currency"],
                     deal["link"], seconds_left,
                 )
-                kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup()
+                # ✅ Если has_kb = False — без кнопок
+                kb = build_offer_keyboard(t, deal_id, deal["lang"]).as_markup() if has_kb else None
+
                 if deal["bc_id"]:
                     await bot.edit_message_text(
                         text=text,
@@ -276,44 +279,17 @@ async def cmd_start(message: Message):
         "👋 <b>Привет!</b>\n\n"
         "Я — бот для автоматизации Telegram Business.\n\n"
         "📌 <b>Команды:</b>\n"
-        "<code>.buy &lt;ссылка_на_NFT&gt; &lt;сумма&gt; &lt;валюта&gt;</code>\n"
-        "— создаёт карточку-оффер с кнопками\n\n"
-        "<code>.test &lt;ссылка&gt;</code>\n"
-        "— заменяет сообщение на ссылку (по умолчанию — ViceCream #30289)\n\n"
+        "<code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — с кнопками\n"
+        "<code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — без кнопок\n\n"
         "<b>Пример:</b>\n"
         "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>",
         parse_mode="HTML",
     )
 
 
-# ================= .test =================
-async def process_test(message: Message, bc_id):
-    """Меняет .test <ссылка> на эту ссылку."""
-    # Берём текст после ".test"
-    user_input = message.text[5:].strip()  # ".test" = 5 символов
-
-    link = user_input if user_input else DEFAULT_TEST_LINK
-
-    try:
-        if bc_id:
-            await bot.edit_message_text(
-                text=link,
-                business_connection_id=bc_id,
-                chat_id=message.chat.id,
-                message_id=message.message_id,
-                disable_web_page_preview=False,
-            )
-        else:
-            await message.answer(link, disable_web_page_preview=False)
-        logging.info(f"[TEST] chat={message.chat.id} → {link}")
-    except Exception as e:
-        if "MESSAGE_ID_INVALID" not in str(e):
-            logging.error(f"test edit fail: {e}")
-
-
-# ================= .buy =================
+# ================= ОБРАБОТКА .buy =================
 async def process_buy(message: Message, bc_id):
-    parsed = parse_buy_args(message.text)
+    parsed = parse_buy_args(message.text, prefix=".buy")
     t = TEXTS["ru"]
 
     if not parsed:
@@ -393,6 +369,94 @@ async def process_buy(message: Message, bc_id):
         "bc_id": bc_id,
         "expires_at": expires_at,
         "message_id": message.message_id,
+        "has_kb": True,
+    }
+
+    deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
+
+
+# ================= ОБРАБОТКА .test =================
+async def process_test(message: Message, bc_id):
+    """Аналог .buy, но БЕЗ кнопок Отклонить/Принять."""
+    parsed = parse_buy_args(message.text, prefix=".test")
+    t = TEXTS["ru"]
+
+    if not parsed:
+        try:
+            if bc_id:
+                await bot.edit_message_text(
+                    text=t["usage"],
+                    business_connection_id=bc_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer(t["usage"], parse_mode="HTML")
+        except Exception as e:
+            if "MESSAGE_ID_INVALID" not in str(e):
+                logging.error(f"usage edit fail: {e}")
+        return
+
+    lang, nft_link, amount, currency = parsed
+    t = TEXTS[lang]
+
+    nft_data = parse_nft_link(nft_link)
+    if not nft_data:
+        try:
+            if bc_id:
+                await bot.edit_message_text(
+                    text=t["invalid_link"],
+                    business_connection_id=bc_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer(t["invalid_link"], parse_mode="HTML")
+        except Exception as e:
+            if "MESSAGE_ID_INVALID" not in str(e):
+                logging.error(f"invalid_link edit fail: {e}")
+        return
+
+    nft_title = nft_data["full"]
+    deal_id = f"{message.chat.id}_{message.message_id}"
+    expires_at = time.time() + OFFER_TTL_SECONDS
+
+    text = build_offer_text(t, nft_title, amount, currency, nft_link, OFFER_TTL_SECONDS)
+    # ✅ БЕЗ КНОПОК
+    try:
+        if bc_id:
+            await bot.edit_message_text(
+                text=text,
+                business_connection_id=bc_id,
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+            )
+        else:
+            await message.answer(
+                text=text,
+                parse_mode="HTML", disable_web_page_preview=False,
+            )
+    except Exception as e:
+        if "MESSAGE_ID_INVALID" not in str(e):
+            logging.error(f"test offer edit fail: {e}")
+        return
+
+    active_deals[deal_id] = {
+        "link": nft_link,
+        "amount": amount,
+        "currency": currency,
+        "title": nft_title,
+        "lang": lang,
+        "user_id": message.from_user.id,
+        "chat_id": message.chat.id,
+        "bc_id": bc_id,
+        "expires_at": expires_at,
+        "message_id": message.message_id,
+        "has_kb": False,  # ✅ без кнопок
     }
 
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
@@ -405,7 +469,6 @@ async def handle_business_message(message: Message):
     if not bc_id:
         return
 
-    # Игнорируем служебные команды (/start, /help)
     if message.text and message.text.startswith("/"):
         return
 
@@ -537,7 +600,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started")
+    logging.info("[START] Bot started — .buy + .test")
 
     app = web.Application()
     app.router.add_get("/", handle)
