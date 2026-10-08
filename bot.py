@@ -991,14 +991,12 @@ async def on_business_connection(conn: BusinessConnection):
             chat_id=conn.user.id,
             text=(
                 "✅ <b>Вы успешно подключили SaveMode!</b>\n\n"
-                "📋 <b>Доступные команды:</b>\n"
-                "• <code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — оффер с кнопками\n"
-                "• <code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — карточка без кнопок\n\n"
+                ""
                 "💾 <b>Save Mode:</b> ON\n"
                 "📥 Уведомления об удалённых и изменённых сообщениях будут приходить сюда.\n\n"
                 "🎁 <b>Пример:</b>\n"
-                "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>\n\n"
                 "━━━━━━━━━━━━━━━━\n"
+                ""
                 f"👤 <b>Разработчик:</b> {DEVELOPER_NAME}"
             ),
             parse_mode="HTML",
