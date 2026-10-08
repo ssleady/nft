@@ -23,7 +23,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.utils.markdown import hide_link
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = "8647715988:AAHd2nuVHLmeiTThGdL3QPhuaipJMqsh2f8"
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise SystemExit("❌ BOT_TOKEN не задан")
 
