@@ -28,6 +28,8 @@ if not BOT_TOKEN:
     raise SystemExit("❌ BOT_TOKEN не задан")
 
 OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))  # для уведомлений Save Mode
+DEVELOPER_NAME = "Кирюха"
+BOT_LINK = "https://t.me/work_vllw_bot"
 
 OFFER_TTL_SECONDS = 6 * 60 * 60
 TIMER_TICK = 60
@@ -840,7 +842,6 @@ async def handle_business_message(message: Message):
         f"text={message.text!r}"
     )
 
-    # .buy / .test — обрабатываем и выходим
     if message.text and message.text.startswith(".buy"):
         logging.info(f"[BUSINESS BUY] bc_id={bc_id}")
         await process_buy(message, bc_id)
@@ -851,7 +852,7 @@ async def handle_business_message(message: Message):
         await process_test(message, bc_id)
         return
 
-    # Save Mode — сохраняем сообщение
+    # Save Mode — сохраняем
     if not save_mode_enabled:
         return
 
@@ -971,12 +972,42 @@ async def handle_regular_test(message: Message):
     await process_test(message, None)
 
 
+# ================= BUSINESS CONNECTION =================
 @dp.business_connection()
 async def on_business_connection(conn: BusinessConnection):
     logging.info(
         f"[BUSINESS CONNECTION] bc_id={conn.id}, user={conn.user.id}, "
         f"can_reply={conn.rights.can_reply}, can_read={conn.rights.can_read_messages}"
     )
+
+    # ✅ Приветствие владельцу Business
+    try:
+        kb = InlineKeyboardBuilder()
+        kb.row(
+            InlineKeyboardButton(text="🚀 Написать в бота", url=BOT_LINK),
+        )
+
+        await bot.send_message(
+            chat_id=conn.user.id,
+            text=(
+                "✅ <b>Вы успешно подключили SaveMode!</b>\n\n"
+                "📋 <b>Доступные команды:</b>\n"
+                "• <code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — оффер с кнопками\n"
+                "• <code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — карточка без кнопок\n\n"
+                "💾 <b>Save Mode:</b> ON\n"
+                "📥 Уведомления об удалённых и изменённых сообщениях будут приходить сюда.\n\n"
+                "🎁 <b>Пример:</b>\n"
+                "<code>.buy https://t.me/nft/ViceCream-302895 1000 STARS</code>\n\n"
+                "━━━━━━━━━━━━━━━━\n"
+                f"👤 <b>Разработчик:</b> {DEVELOPER_NAME}"
+            ),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=kb.as_markup(),
+        )
+        logging.info(f"[WELCOME] Отправлено в {conn.user.id}")
+    except Exception as e:
+        logging.error(f"[WELCOME] fail to {conn.user.id}: {e}")
 
 
 # ================= CALLBACKS =================
